@@ -1,5 +1,7 @@
 import {
   Building2,
+  ChevronDown,
+  ChevronUp,
   Cigarette,
   LocateFixed,
   MapPin,
@@ -100,6 +102,7 @@ export const InteractiveMap = ({
   const [viewMode, setViewMode] = useState<ViewMode>("current");
   const [showAllLocations, setShowAllLocations] = useState(false);
   const [showSmokingAreas, setShowSmokingAreas] = useState(false);
+  const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [transform, setTransform] = useState<TransformState>(INITIAL_TRANSFORM);
   const [currentImageUrl, setCurrentImageUrl] = useState(imageUrl ?? fallbackImageUrl);
   const [hasImageError, setHasImageError] = useState(false);
@@ -321,7 +324,7 @@ export const InteractiveMap = ({
       onWheel={handleWheel}
       ref={viewportRef}
       role="application"
-      style={{ touchAction: "none" }}
+      style={{ overscrollBehavior: "none", touchAction: "none" }}
     >
       <div
         className="absolute left-1/2 top-1/2 origin-center select-none"
@@ -429,6 +432,10 @@ export const InteractiveMap = ({
       <div
         className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 rounded-full bg-white/95 p-1 shadow-soft backdrop-blur"
         onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
         <button
           className={cn(
@@ -455,6 +462,10 @@ export const InteractiveMap = ({
       <div
         className="absolute right-3 top-3 z-20 flex flex-col gap-2"
         onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
         <button
           aria-label="확대"
@@ -483,31 +494,52 @@ export const InteractiveMap = ({
       </div>
 
       <div
-        className="absolute bottom-4 left-4 z-20 w-[min(14rem,calc(100%-2rem))] rounded-lg bg-white/95 p-3 shadow-soft backdrop-blur"
+        className="absolute bottom-4 left-4 z-20 w-[min(14rem,calc(100%-2rem))]"
         onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
-        <p className="mb-2 flex items-center gap-1 text-xs font-bold text-brand-900">
-          <LocateFixed className="h-4 w-4" />
-          지도 옵션
-        </p>
-        <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
-          <input
-            checked={showAllLocations}
-            className="h-4 w-4 accent-brand-700"
-            onChange={(event) => setShowAllLocations(event.target.checked)}
-            type="checkbox"
-          />
-          모든 장소
-        </label>
-        <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
-          <input
-            checked={showSmokingAreas}
-            className="h-4 w-4 accent-brand-700"
-            onChange={(event) => setShowSmokingAreas(event.target.checked)}
-            type="checkbox"
-          />
-          흡연구역
-        </label>
+        {isOptionsOpen ? (
+          <div className="mb-2 rounded-lg bg-white/95 p-3 shadow-soft backdrop-blur">
+            <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
+              <input
+                checked={showAllLocations}
+                className="h-4 w-4 accent-brand-700"
+                onChange={(event) => setShowAllLocations(event.target.checked)}
+                type="checkbox"
+              />
+              모든 장소
+            </label>
+            <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
+              <input
+                checked={showSmokingAreas}
+                className="h-4 w-4 accent-brand-700"
+                onChange={(event) => setShowSmokingAreas(event.target.checked)}
+                type="checkbox"
+              />
+              흡연구역
+            </label>
+          </div>
+        ) : null}
+
+        <button
+          aria-expanded={isOptionsOpen}
+          className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg bg-white/95 px-3 py-2 text-sm font-bold text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
+          onClick={() => setIsOptionsOpen((isOpen) => !isOpen)}
+          type="button"
+        >
+          <span className="flex items-center gap-1.5">
+            <LocateFixed className="h-4 w-4" />
+            지도 옵션
+          </span>
+          {isOptionsOpen ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronUp className="h-4 w-4" />
+          )}
+        </button>
       </div>
     </div>
   );

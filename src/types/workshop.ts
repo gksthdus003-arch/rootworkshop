@@ -51,17 +51,29 @@ export interface MapConfig {
 
 export interface EventItem {
   id: string;
+  workshopId?: WorkshopGuideId;
   title: string;
   description: string;
   status: EventStatus;
   opensAt: string;
   closesAt: string;
+  requiresTeamAssignment: boolean;
   survey: SurveyQuestion[];
   resultSummary?: string;
+  teams: EventTeam[];
+  /** @deprecated Legacy localStorage shape. Normalized into teams at load time. */
   groupAssignments?: Array<{
     groupName: string;
     members: string[];
   }>;
+}
+
+export interface EventTeam {
+  id: string;
+  eventId: string;
+  name: string;
+  members: string[];
+  memo?: string;
 }
 
 export interface SurveyQuestion {
@@ -98,6 +110,7 @@ export interface EventSurveyResponse {
   eventId: string;
   participantName: string;
   submittedAt: string;
+  assignedTeamId?: string;
   answers: Record<string, string | string[]>;
 }
 

@@ -174,11 +174,13 @@ export const mockWorkshopGuides: WorkshopGuide[] = [
     events: [
       {
         id: "activity-pre-survey",
+        workshopId: "workshop-2026",
         title: "액티비티 사전 설문",
         description: "유료 액티비티 참여 의사와 선호 종목을 확인합니다.",
         status: "active",
         opensAt: "2026-06-12T09:00:00+09:00",
         closesAt: "2026-06-12T11:30:00+09:00",
+        requiresTeamAssignment: false,
         survey: [
           {
             id: "intro",
@@ -206,14 +208,17 @@ export const mockWorkshopGuides: WorkshopGuide[] = [
             label: "운영팀에 전달할 내용이 있다면 적어주세요.",
           },
         ],
+        teams: [],
       },
       {
         id: "bowling-level-test",
+        workshopId: "workshop-2026",
         title: "볼링 대회 레벨 테스트",
         description: "공정한 조 편성을 위해 볼링 경험을 확인합니다.",
         status: "waiting",
         opensAt: "2026-06-12T14:00:00+09:00",
         closesAt: "2026-06-12T15:00:00+09:00",
+        requiresTeamAssignment: true,
         survey: [
           {
             id: "guide",
@@ -234,24 +239,33 @@ export const mockWorkshopGuides: WorkshopGuide[] = [
             label: "최근 평균 점수를 알고 있다면 적어주세요.",
           },
         ],
+        teams: [],
       },
       {
         id: "team-result",
+        workshopId: "workshop-2026",
         title: "조 배정 결과",
         description: "저녁 액티비티 조 배정 결과를 확인합니다.",
         status: "closed",
         opensAt: "2026-06-12T16:00:00+09:00",
         closesAt: "2026-06-12T17:00:00+09:00",
+        requiresTeamAssignment: true,
         survey: [],
         resultSummary: "볼링 대회 조 배정이 완료되었습니다.",
-        groupAssignments: [
+        teams: [
           {
-            groupName: "A조",
+            id: "team-result-a",
+            eventId: "team-result",
+            name: "A조",
             members: ["김민준", "이서연", "박도윤", "최지우"],
+            memo: "초급/중급 균형 조",
           },
           {
-            groupName: "B조",
+            id: "team-result-b",
+            eventId: "team-result",
+            name: "B조",
             members: ["정하준", "한수아", "오지훈", "강예린"],
+            memo: "상급 리드 포함",
           },
         ],
       },

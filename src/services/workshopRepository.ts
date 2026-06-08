@@ -4,6 +4,7 @@ import type {
   AnnouncementItem,
   EventItem,
   EventStatus,
+  EventTeam,
   EventSurveyResponse,
   ParticipantProfile,
   RecommendationItem,
@@ -25,6 +26,7 @@ export interface WorkshopRepository {
   verifyAdminPassword: (password: string) => boolean;
   setAdminPassword: (password: string) => void;
   listEventResponses: () => EventSurveyResponse[];
+  saveEventResponses: (responses: EventSurveyResponse[]) => void;
   saveEventResponse: (response: EventSurveyResponse) => void;
   getEventOverrides: () => Record<string, EventItem[]>;
   saveEventOverrides: (eventOverrides: Record<string, EventItem[]>) => void;
@@ -52,17 +54,45 @@ const normalizeSurvey = (survey: SurveyQuestion[] | undefined): SurveyQuestion[]
       }))
     : [];
 
-const normalizeEvent = (event: EventItem, index: number): EventItem => ({
-  id: event.id || `event-${index + 1}`,
-  title: event.title || "이벤트",
-  description: event.description || "",
-  status: validEventStatuses.includes(event.status) ? event.status : "waiting",
-  opensAt: event.opensAt || new Date().toISOString(),
-  closesAt: event.closesAt || new Date().toISOString(),
-  survey: normalizeSurvey(event.survey),
-  resultSummary: event.resultSummary,
-  groupAssignments: Array.isArray(event.groupAssignments) ? event.groupAssignments : [],
+const normalizeTeam = (team: EventTeam, eventId: string, index: number): EventTeam => ({
+  id: team.id || `${eventId}-team-${index + 1}`,
+  eventId: team.eventId || eventId,
+  name: team.name || `조 ${index + 1}`,
+  members: Array.isArray(team.members) ? team.members : [],
+  memo: team.memo ?? "",
 });
+
+const normalizeLegacyTeams = (event: EventItem) =>
+  Array.isArray(event.groupAssignments)
+    ? event.groupAssignments.map((groupAssignment, index) => ({
+        id: `${event.id || "event"}-legacy-team-${index + 1}`,
+        eventId: event.id || "",
+        name: groupAssignment.groupName,
+        members: groupAssignment.members,
+        memo: "",
+      }))
+    : [];
+
+const normalizeEvent = (event: EventItem, index: number, workshopId: string): EventItem => {
+  const eventId = event.id || `event-${index + 1}`;
+  const teams = Array.isArray(event.teams) && event.teams.length > 0
+    ? event.teams
+    : normalizeLegacyTeams(event);
+
+  return {
+    id: eventId,
+    workshopId: event.workshopId || workshopId,
+    title: event.title || "이벤트",
+    description: event.description || "",
+    status: validEventStatuses.includes(event.status) ? event.status : "waiting",
+    opensAt: event.opensAt || new Date().toISOString(),
+    closesAt: event.closesAt || new Date().toISOString(),
+    requiresTeamAssignment: event.requiresTeamAssignment ?? teams.length > 0,
+    survey: normalizeSurvey(event.survey),
+    resultSummary: event.resultSummary,
+    teams: teams.map((team, teamIndex) => normalizeTeam(team, eventId, teamIndex)),
+  };
+};
 
 const normalizeRecommendation = (
   recommendation: RecommendationItem,
@@ -110,7 +140,7 @@ const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => (
     locations: Array.isArray(guide.map?.locations) ? guide.map.locations : [],
   },
   events: Array.isArray(guide.events)
-    ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex))
+    ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
     : [],
   recommendations: Array.isArray(guide.recommendations)
     ? guide.recommendations.map((recommendation, recommendationIndex) =>
@@ -181,6 +211,9 @@ export const mockWorkshopRepository: WorkshopRepository = {
   },
   listEventResponses: () =>
     readFromStorage<EventSurveyResponse[]>(storageKeys.eventResponses, []),
+  saveEventResponses: (responses) => {
+    writeToStorage(storageKeys.eventResponses, responses);
+  },
   saveEventResponse: (response) => {
     const responses = readFromStorage<EventSurveyResponse[]>(storageKeys.eventResponses, []);
     const nextResponses = responses.filter(

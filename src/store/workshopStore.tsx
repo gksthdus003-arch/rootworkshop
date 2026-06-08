@@ -11,6 +11,7 @@ import type {
   BottomTabId,
   EventItem,
   EventSurveyResponse,
+  EventTeam,
   MapLocation,
   ParticipantProfile,
   RecommendationItem,
@@ -64,12 +65,26 @@ interface WorkshopStoreValue {
     updates: Partial<SurveyQuestion>,
   ) => void;
   deleteSurveyQuestion: (guideId: string, eventId: string, questionId: string) => void;
-  addGroupAssignment: (
+  moveSurveyQuestion: (
     guideId: string,
     eventId: string,
-    groupAssignment: NonNullable<EventItem["groupAssignments"]>[number],
+    questionId: string,
+    direction: "up" | "down",
   ) => void;
-  deleteGroupAssignment: (guideId: string, eventId: string, groupName: string) => void;
+  addEventTeam: (guideId: string, eventId: string, team: EventTeam) => void;
+  updateEventTeam: (
+    guideId: string,
+    eventId: string,
+    teamId: string,
+    updates: Partial<EventTeam>,
+  ) => void;
+  deleteEventTeam: (guideId: string, eventId: string, teamId: string) => void;
+  assignEventResponseTeam: (
+    guideId: string,
+    eventId: string,
+    participantName: string,
+    teamId?: string,
+  ) => void;
   addRecommendation: (guideId: string, recommendation: RecommendationItem) => void;
   updateRecommendation: (
     guideId: string,
@@ -377,38 +392,176 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       }));
     };
 
-    const addGroupAssignment = (
+    const moveSurveyQuestion = (
       guideId: string,
       eventId: string,
-      groupAssignment: NonNullable<EventItem["groupAssignments"]>[number],
+      questionId: string,
+      direction: "up" | "down",
     ) => {
+      updateGuideById(guideId, (guide) => ({
+        ...guide,
+        events: guide.events.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          const survey = [...event.survey];
+          const currentIndex = survey.findIndex((question) => question.id === questionId);
+          const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+          if (currentIndex < 0 || nextIndex < 0 || nextIndex >= survey.length) {
+            return event;
+          }
+
+          [survey[currentIndex], survey[nextIndex]] = [survey[nextIndex], survey[currentIndex]];
+
+          return {
+            ...event,
+            survey,
+          };
+        }),
+      }));
+    };
+
+    const syncEventTeamAssignments = (
+      guideId: string,
+      eventId: string,
+      teams: EventTeam[],
+    ) => {
+      setEventResponses((responses) => {
+        const nextResponses = responses.map((response) => {
+          if (response.guideId !== guideId || response.eventId !== eventId) {
+            return response;
+          }
+
+          const assignedTeam = teams.find((team) =>
+            team.members.includes(response.participantName),
+          );
+
+          return {
+            ...response,
+            assignedTeamId: assignedTeam?.id,
+          };
+        });
+
+        mockWorkshopRepository.saveEventResponses(nextResponses);
+        return nextResponses;
+      });
+    };
+
+    const addEventTeam = (guideId: string, eventId: string, team: EventTeam) => {
+      const guide = guides.find((item) => item.id === guideId);
+      const event = guide?.events.find((item) => item.id === eventId);
+      const nextTeams = [...(event?.teams ?? []), team];
+
       updateGuideById(guideId, (guide) => ({
         ...guide,
         events: guide.events.map((event) =>
           event.id === eventId
             ? {
                 ...event,
-                groupAssignments: [...(event.groupAssignments ?? []), groupAssignment],
+                teams: [...event.teams, team],
               }
             : event,
         ),
       }));
+      syncEventTeamAssignments(guideId, eventId, nextTeams);
     };
 
-    const deleteGroupAssignment = (guideId: string, eventId: string, groupName: string) => {
+    const updateEventTeam = (
+      guideId: string,
+      eventId: string,
+      teamId: string,
+      updates: Partial<EventTeam>,
+    ) => {
+      const guide = guides.find((item) => item.id === guideId);
+      const event = guide?.events.find((item) => item.id === eventId);
+      const nextTeams = (event?.teams ?? []).map((team) =>
+        team.id === teamId ? { ...team, ...updates } : team,
+      );
+
       updateGuideById(guideId, (guide) => ({
         ...guide,
         events: guide.events.map((event) =>
           event.id === eventId
             ? {
                 ...event,
-                groupAssignments: (event.groupAssignments ?? []).filter(
-                  (groupAssignment) => groupAssignment.groupName !== groupName,
+                teams: event.teams.map((team) =>
+                  team.id === teamId ? { ...team, ...updates } : team,
                 ),
               }
             : event,
         ),
       }));
+      syncEventTeamAssignments(guideId, eventId, nextTeams);
+    };
+
+    const deleteEventTeam = (guideId: string, eventId: string, teamId: string) => {
+      const guide = guides.find((item) => item.id === guideId);
+      const event = guide?.events.find((item) => item.id === eventId);
+      const nextTeams = (event?.teams ?? []).filter((team) => team.id !== teamId);
+
+      updateGuideById(guideId, (guide) => ({
+        ...guide,
+        events: guide.events.map((event) =>
+          event.id === eventId
+            ? {
+                ...event,
+                teams: event.teams.filter((team) => team.id !== teamId),
+              }
+            : event,
+        ),
+      }));
+      syncEventTeamAssignments(guideId, eventId, nextTeams);
+    };
+
+    const assignEventResponseTeam = (
+      guideId: string,
+      eventId: string,
+      participantName: string,
+      teamId?: string,
+    ) => {
+      updateGuideById(guideId, (guide) => ({
+        ...guide,
+        events: guide.events.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          return {
+            ...event,
+            teams: event.teams.map((team) => {
+              const membersWithoutParticipant = team.members.filter(
+                (member) => member !== participantName,
+              );
+
+              return {
+                ...team,
+                members:
+                  team.id === teamId
+                    ? [...membersWithoutParticipant, participantName]
+                    : membersWithoutParticipant,
+              };
+            }),
+          };
+        }),
+      }));
+
+      setEventResponses((responses) => {
+        const nextResponses = responses.map((response) =>
+          response.guideId === guideId &&
+          response.eventId === eventId &&
+          response.participantName === participantName
+            ? {
+                ...response,
+                assignedTeamId: teamId,
+              }
+            : response,
+        );
+
+        mockWorkshopRepository.saveEventResponses(nextResponses);
+        return nextResponses;
+      });
     };
 
     const addRecommendation = (guideId: string, recommendation: RecommendationItem) => {
@@ -522,8 +675,11 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       addSurveyQuestion,
       updateSurveyQuestion,
       deleteSurveyQuestion,
-      addGroupAssignment,
-      deleteGroupAssignment,
+      moveSurveyQuestion,
+      addEventTeam,
+      updateEventTeam,
+      deleteEventTeam,
+      assignEventResponseTeam,
       addRecommendation,
       updateRecommendation,
       deleteRecommendation,

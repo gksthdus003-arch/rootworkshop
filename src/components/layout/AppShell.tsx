@@ -36,19 +36,21 @@ export const AppShell = ({
     selectGuide,
     setActiveTab,
   } = useWorkshopStore();
-  const hasScheduleStrip = selectedGuide.schedule.length > 0;
+  const scheduleStripGuide = selectedGuide.schedule.length > 0 ? selectedGuide : defaultGuide;
+  const hasScheduleStrip = scheduleStripGuide.schedule.length > 0;
   const visibleGuides = [
     defaultGuide,
     ...guides.filter((guide) => guide.id !== defaultGuide.id && guide.isPublished),
   ];
+  const isMapTab = showBottomNav && activeTab === "map";
 
   return (
     <div className="flex h-[100dvh] min-h-[32rem] flex-col overflow-hidden bg-surface">
       {hasScheduleStrip ? (
         <CurrentSessionStrip
           onShortcutClick={openScheduleTab}
-          schedule={selectedGuide.schedule}
-          scheduleControl={selectedGuide.scheduleControl}
+          schedule={scheduleStripGuide.schedule}
+          scheduleControl={scheduleStripGuide.scheduleControl}
         />
       ) : null}
 
@@ -82,10 +84,13 @@ export const AppShell = ({
 
       <main
         className={cn(
-          "mx-auto min-h-0 w-full max-w-screen-md flex-1 overflow-y-auto px-4 pt-5",
-          showBottomNav ? "pb-4" : "pb-8",
+          "mx-auto min-h-0 w-full max-w-screen-md flex-1",
+          isMapTab
+            ? "overflow-hidden p-0"
+            : cn("overflow-y-auto px-4 pt-5", showBottomNav ? "pb-4" : "pb-8"),
         )}
       >
+        {!isMapTab ? (
         <div className="mb-4 flex items-center justify-between gap-3 md:hidden">
           <p className="truncate text-sm font-semibold text-gray-500">
             {participantProfile?.name ? `${participantProfile.name}님` : "참가자"}
@@ -94,6 +99,7 @@ export const AppShell = ({
             일정 바로가기
           </Button>
         </div>
+        ) : null}
         {children}
       </main>
 
