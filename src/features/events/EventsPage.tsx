@@ -319,6 +319,7 @@ interface EventResultPageProps {
 }
 
 const EventResultPage = ({ event, participantName, response, onBack }: EventResultPageProps) => {
+  const [isAllTeamsOpen, setIsAllTeamsOpen] = useState(false);
   const assignedTeam =
     event.teams.find((team) => team.id === response?.assignedTeamId) ??
     event.teams.find((team) => (participantName ? team.members.includes(participantName) : false));
@@ -374,29 +375,73 @@ const EventResultPage = ({ event, participantName, response, onBack }: EventResu
                   조 배정 대기 중입니다.
                 </p>
               )}
+              <Button
+                className="mt-3 min-h-9 w-full py-1.5"
+                onClick={() => setIsAllTeamsOpen((isOpen) => !isOpen)}
+                variant="secondary"
+              >
+                {isAllTeamsOpen ? "전체 조 접기" : "전체 조 보기"}
+              </Button>
             </Card>
 
-            <Card className="p-3">
-              <p className="text-base font-bold text-gray-950">내 설문 제출 내용</p>
-              {response && Object.keys(response.answers).length > 0 ? (
+            {isAllTeamsOpen ? (
+              <Card className="p-3">
+                <p className="text-base font-bold text-gray-950">전체 조</p>
                 <div className="mt-3 space-y-2">
-                  {Object.entries(response.answers).map(([questionId, answer]) => {
-                    const question = event.survey.find((item) => item.id === questionId);
+                  {event.teams.length > 0 ? (
+                    event.teams.map((team) => {
+                      const isMyTeam = assignedTeam?.id === team.id;
 
-                    return (
-                      <p className="text-sm leading-5 text-gray-600" key={questionId}>
-                        <span className="font-semibold text-gray-950">
-                          {question?.label ?? questionId}:
-                        </span>{" "}
-                        {formatAnswerValue(answer)}
-                      </p>
-                    );
-                  })}
+                      return (
+                        <section
+                          className={cn(
+                            "rounded-lg border p-3",
+                            isMyTeam
+                              ? "border-brand-200 bg-brand-50"
+                              : "border-gray-200 bg-white",
+                          )}
+                          key={team.id}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p
+                              className={cn(
+                                "font-bold",
+                                isMyTeam ? "text-brand-950" : "text-gray-950",
+                              )}
+                            >
+                              {team.name}
+                            </p>
+                            {isMyTeam ? (
+                              <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[11px] font-bold text-white">
+                                내 조
+                              </span>
+                            ) : null}
+                          </div>
+                          {team.members.length > 0 ? (
+                            <p className="mt-2 break-words text-sm leading-5 text-gray-600">
+                              {team.members.join(", ")}
+                            </p>
+                          ) : (
+                            <p className="mt-2 text-sm leading-5 text-gray-500">
+                              아직 배정된 인원이 없습니다.
+                            </p>
+                          )}
+                          {team.memo ? (
+                            <p className="mt-2 break-words text-xs font-bold text-brand-700">
+                              {team.memo}
+                            </p>
+                          ) : null}
+                        </section>
+                      );
+                    })
+                  ) : (
+                    <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                      등록된 조가 없습니다.
+                    </p>
+                  )}
                 </div>
-              ) : (
-                <p className="mt-2 text-sm text-gray-500">제출한 설문 응답이 없습니다.</p>
-              )}
-            </Card>
+              </Card>
+            ) : null}
           </div>
         )}
       </div>
@@ -422,14 +467,34 @@ const getEventButtonLabel = (
   }
 
   if (event.status === "active") {
-    return hasSubmitted ? "응답 수정" : "참여하기";
+    return hasSubmitted ? "응답 완료" : "참여하기";
   }
 
   if (event.requiresTeamAssignment) {
     return hasAssignedTeam ? "조 배치 확인" : "조 배정 대기 중";
   }
 
-  return hasSubmitted ? "제출 내용 확인" : "완료";
+  return hasSubmitted ? "제출 완료" : "완료";
+};
+
+const getEventButtonDisabled = (
+  event: EventItem,
+  hasSubmitted: boolean,
+  hasAssignedTeam: boolean,
+) => {
+  if (event.status === "waiting") {
+    return true;
+  }
+
+  if (event.status === "active") {
+    return hasSubmitted;
+  }
+
+  if (!event.requiresTeamAssignment) {
+    return true;
+  }
+
+  return !hasAssignedTeam;
 };
 
 export const EventsPage = () => {
@@ -449,7 +514,10 @@ export const EventsPage = () => {
   }, [eventResponses, participantName, selectedGuide.id]);
 
   const surveyEvent = selectedGuide.events.find(
-    (event) => event.id === surveyEventId && event.status === "active",
+    (event) =>
+      event.id === surveyEventId &&
+      event.status === "active" &&
+      !responseByEventId.has(event.id),
   );
   const resultEvent = selectedGuide.events.find(
     (event) => event.id === resultEventId && event.status === "closed",
@@ -461,7 +529,7 @@ export const EventsPage = () => {
         event={surveyEvent}
         onBack={() => setSurveyEventId(undefined)}
         onSubmit={(answers) => {
-          if (!participantName) {
+          if (!participantName || responseByEventId.has(surveyEvent.id)) {
             return;
           }
 
@@ -516,6 +584,11 @@ export const EventsPage = () => {
             const isWaitingForTeam =
               event.status === "closed" && event.requiresTeamAssignment && !hasAssignedTeam;
             const buttonLabel = getEventButtonLabel(event, hasSubmitted, hasAssignedTeam);
+            const isButtonDisabled = getEventButtonDisabled(
+              event,
+              hasSubmitted,
+              hasAssignedTeam,
+            );
 
             return (
               <Card key={event.id}>
@@ -547,10 +620,17 @@ export const EventsPage = () => {
                     <p className="mt-1 text-sm leading-5 text-gray-600">{event.description}</p>
 
                     {hasSubmitted ? (
-                      <p className="mt-2 flex items-center gap-1 text-xs font-bold text-brand-700">
-                        <CheckCircle2 className="h-4 w-4" />
-                        응답 제출 완료
-                      </p>
+                      <div className="mt-2 space-y-1">
+                        <p className="flex items-center gap-1 text-xs font-bold text-brand-700">
+                          <CheckCircle2 className="h-4 w-4" />
+                          응답 제출 완료
+                        </p>
+                        {event.status === "active" ? (
+                          <p className="text-xs font-semibold text-gray-500">
+                           
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                     {isWaitingForTeam ? (
                       <p className="mt-2 text-xs font-bold text-yellow-800">
@@ -561,22 +641,26 @@ export const EventsPage = () => {
                 </div>
                 <Button
                   className="mt-3 min-h-9 w-full py-1.5"
-                  disabled={event.status === "waiting"}
+                  disabled={isButtonDisabled}
                   icon={
                     event.status === "closed" ? (
                       <ClipboardList className="h-4 w-4" />
                     ) : undefined
                   }
                   onClick={() => {
-                    if (event.status === "active") {
+                    if (event.status === "active" && !hasSubmitted) {
                       setSurveyEventId(event.id);
                     }
 
-                    if (event.status === "closed") {
+                    if (
+                      event.status === "closed" &&
+                      event.requiresTeamAssignment &&
+                      hasAssignedTeam
+                    ) {
                       setResultEventId(event.id);
                     }
                   }}
-                  variant={event.status === "active" ? "primary" : "secondary"}
+                  variant={event.status === "active" && !hasSubmitted ? "primary" : "secondary"}
                 >
                   {buttonLabel}
                 </Button>
