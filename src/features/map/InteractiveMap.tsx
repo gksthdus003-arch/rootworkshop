@@ -157,7 +157,10 @@ export const InteractiveMap = ({
   };
 
   const applyTransform = (nextTransform: TransformState) => {
-    setTransform(getClampedTransform(nextTransform));
+    const clampedTransform = getClampedTransform(nextTransform);
+
+    transformRef.current = clampedTransform;
+    setTransform(clampedTransform);
   };
 
   const visibleLocations = useMemo(
@@ -371,13 +374,52 @@ export const InteractiveMap = ({
 
     gestureRef.current = {
       type: "pinch",
-      startDistance: getDistance(first, second),
+      startDistance: Math.max(1, getDistance(first, second)),
       startCenter: getCenter(first, second),
       origin: transformRef.current,
     };
   };
 
+  const getPinchTransform = (
+    origin: TransformState,
+    startCenter: { x: number; y: number },
+    currentCenter: { x: number; y: number },
+    scale: number,
+  ): TransformState => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+
+    if (!rect || origin.scale <= 0) {
+      return {
+        scale,
+        x: origin.x + currentCenter.x - startCenter.x,
+        y: origin.y + currentCenter.y - startCenter.y,
+      };
+    }
+
+    const viewportCenter = {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    const scaleRatio = scale / origin.scale;
+
+    return {
+      scale,
+      x:
+        currentCenter.x -
+        viewportCenter.x -
+        (startCenter.x - viewportCenter.x - origin.x) * scaleRatio,
+      y:
+        currentCenter.y -
+        viewportCenter.y -
+        (startCenter.y - viewportCenter.y - origin.y) * scaleRatio,
+    };
+  };
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+    }
+
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = { id: event.pointerId, x: event.clientX, y: event.clientY };
     pointersRef.current.set(event.pointerId, point);
@@ -393,6 +435,10 @@ export const InteractiveMap = ({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+    }
+
     if (!pointersRef.current.has(event.pointerId)) {
       return;
     }
@@ -426,11 +472,7 @@ export const InteractiveMap = ({
         MAX_SCALE,
       );
 
-      applyTransform({
-        scale,
-        x: gesture.origin.x + center.x - gesture.startCenter.x,
-        y: gesture.origin.y + center.y - gesture.startCenter.y,
-      });
+      applyTransform(getPinchTransform(gesture.origin, gesture.startCenter, center, scale));
       return;
     }
 
@@ -445,6 +487,14 @@ export const InteractiveMap = ({
       x: gesture.origin.x + point.x - gesture.startX,
       y: gesture.origin.y + point.y - gesture.startY,
     });
+  };
+
+  const handlePointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") {
+      return;
+    }
+
+    stopPointerGesture(event);
   };
 
   const stopPointerGesture = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -544,7 +594,7 @@ export const InteractiveMap = ({
       className="relative h-full w-full overflow-hidden bg-[#dce8c8] [clip-path:inset(0)]"
       onPointerCancel={stopPointerGesture}
       onPointerDown={handlePointerDown}
-      onPointerLeave={stopPointerGesture}
+      onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
       onPointerUp={stopPointerGesture}
       onWheel={handleWheel}
@@ -656,7 +706,7 @@ export const InteractiveMap = ({
       >
         <button
           className={cn(
-            "h-9 rounded-full px-4 text-sm font-bold transition",
+            "h-[30px] rounded-full px-4 text-[13px] font-bold transition",
             viewMode === "featured" ? "bg-brand-700 text-white" : "text-gray-600 hover:bg-gray-100",
           )}
           onClick={() => setViewMode("featured")}
@@ -666,7 +716,7 @@ export const InteractiveMap = ({
         </button>
         <button
           className={cn(
-            "h-9 rounded-full px-4 text-sm font-bold transition",
+            "h-[30px] rounded-full px-4 text-[13px] font-bold transition",
             viewMode === "all" ? "bg-brand-700 text-white" : "text-gray-600 hover:bg-gray-100",
           )}
           onClick={() => setViewMode("all")}
@@ -737,7 +787,7 @@ export const InteractiveMap = ({
           key={preGuideNudgeId}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <span>워크숍 시작 전입니다. 사전안내를 먼저 확인해주세요.</span>
+          <span>워크숍 시작 전입니다.</span>
           <button
             className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
             onClick={onPreGuideClick}
