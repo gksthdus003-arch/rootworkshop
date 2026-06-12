@@ -1,7 +1,4 @@
 import {
-  ChevronDown,
-  ChevronUp,
-  LocateFixed,
   Minus,
   Plus,
   RotateCcw,
@@ -19,7 +16,7 @@ import { cn } from "../../lib/cn";
 import { getMapLocationCategoryIcon } from "../../lib/mapLocationCategories";
 import type { MapLocation } from "../../types/workshop";
 
-type ViewMode = "current" | "all";
+type ViewMode = "featured" | "all";
 
 interface TransformState {
   scale: number;
@@ -53,8 +50,6 @@ interface InteractiveMapProps {
   imageUrl?: string;
   fallbackImageUrl?: string;
   locations: MapLocation[];
-  focusLocationId?: string;
-  onCurrentLocationClick?: () => void;
   isLocationEditingEnabled?: boolean;
   onLocationPositionChange?: (locationId: string, position: { xPercent: number; yPercent: number }) => void;
 }
@@ -74,20 +69,6 @@ const getCenter = (first: PointerPoint, second: PointerPoint) => ({
   y: (first.y + second.y) / 2,
 });
 
-const getFocusedTransform = (location: MapLocation | undefined, mapSize: number) => {
-  if (!location || mapSize <= 0) {
-    return INITIAL_TRANSFORM;
-  }
-
-  const scale = 2.15;
-
-  return {
-    scale,
-    x: -((location.xPercent - 50) / 100) * mapSize * scale,
-    y: -((location.yPercent - 50) / 100) * mapSize * scale,
-  };
-};
-
 const areTransformsEqual = (first: TransformState, second: TransformState) =>
   first.scale === second.scale && first.x === second.x && first.y === second.y;
 
@@ -98,8 +79,6 @@ export const InteractiveMap = ({
   imageUrl,
   fallbackImageUrl,
   locations,
-  focusLocationId,
-  onCurrentLocationClick,
   isLocationEditingEnabled = false,
   onLocationPositionChange,
 }: InteractiveMapProps) => {
@@ -109,10 +88,7 @@ export const InteractiveMap = ({
   const transformRef = useRef<TransformState>(INITIAL_TRANSFORM);
   const draggedLocationIdRef = useRef<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [viewMode, setViewMode] = useState<ViewMode>("current");
-  const [showAllLocations, setShowAllLocations] = useState(false);
-  const [showSmokingAreas, setShowSmokingAreas] = useState(false);
-  const [isOptionsOpen, setIsOptionsOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("featured");
   const [transform, setTransform] = useState<TransformState>(INITIAL_TRANSFORM);
   const [currentImageUrl, setCurrentImageUrl] = useState(imageUrl ?? fallbackImageUrl);
   const [hasImageError, setHasImageError] = useState(false);
@@ -123,7 +99,6 @@ export const InteractiveMap = ({
     320,
     Math.min(viewportSize.width || fallbackMapSize, viewportSize.height || fallbackMapSize),
   );
-  const focusLocation = locations.find((location) => location.id === focusLocationId);
 
   const getClampedTransform = (nextTransform: TransformState): TransformState => {
     const scale = clamp(nextTransform.scale, MIN_SCALE, MAX_SCALE);
@@ -153,18 +128,10 @@ export const InteractiveMap = ({
 
   const visibleLocations = useMemo(
     () =>
-      locations.filter((location) => {
-        if (location.isSmokingArea) {
-          return showSmokingAreas;
-        }
-
-        if (showAllLocations) {
-          return true;
-        }
-
-        return location.isWorkshopLocation || location.id === focusLocation?.id;
-      }),
-    [focusLocation?.id, locations, showAllLocations, showSmokingAreas],
+      viewMode === "featured"
+        ? locations.filter((location) => location.isWorkshopLocation)
+        : locations,
+    [locations, viewMode],
   );
 
   useLayoutEffect(() => {
@@ -210,13 +177,8 @@ export const InteractiveMap = ({
   }, [transform]);
 
   useEffect(() => {
-    if (viewMode === "current") {
-      applyTransform(getFocusedTransform(focusLocation, mapSize));
-      return;
-    }
-
     applyTransform(INITIAL_TRANSFORM);
-  }, [focusLocation?.id, mapSize, viewMode]);
+  }, [mapSize, viewMode]);
 
   useEffect(() => {
     setTransform((previous) => {
@@ -227,7 +189,7 @@ export const InteractiveMap = ({
   }, [mapSize, viewportSize.height, viewportSize.width]);
 
   const resetTransform = () => {
-    applyTransform(viewMode === "current" ? getFocusedTransform(focusLocation, mapSize) : INITIAL_TRANSFORM);
+    applyTransform(INITIAL_TRANSFORM);
   };
 
   const updateScale = (scaleDelta: number) => {
@@ -479,20 +441,8 @@ export const InteractiveMap = ({
           </div>
         ) : null}
 
-        {focusLocation ? (
-          <div
-            aria-hidden
-            className="absolute h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand-700 bg-brand-500/15 shadow-[0_0_0_10px_rgba(34,197,94,0.16)]"
-            style={{
-              left: `${focusLocation.xPercent}%`,
-              top: `${focusLocation.yPercent}%`,
-            }}
-          />
-        ) : null}
-
         {visibleLocations.map((location) => {
           const CategoryIcon = getMapLocationCategoryIcon(location.category);
-          const isFocused = location.id === focusLocation?.id;
 
           return (
             <div
@@ -508,7 +458,7 @@ export const InteractiveMap = ({
               style={{
                 left: `${location.xPercent}%`,
                 top: `${location.yPercent}%`,
-                zIndex: isFocused ? 30 : location.isWorkshopLocation ? 20 : 10,
+                zIndex: location.isWorkshopLocation ? 20 : 10,
               }}
             >
               <div
@@ -521,11 +471,9 @@ export const InteractiveMap = ({
                 <span
                   className={cn(
                     "max-w-28 truncate rounded-full px-2 py-0.5 font-bold shadow-soft",
-                    isFocused
-                      ? "text-[11px] bg-yellow-300 text-gray-950"
-                      : location.isSmokingArea
-                        ? "bg-gray-900 text-[10px] text-white"
-                        : "bg-white text-[10px] text-brand-900",
+                    location.isSmokingArea
+                      ? "bg-gray-900 text-[10px] text-white"
+                      : "bg-white text-[10px] text-brand-900",
                   )}
                 >
                   {location.name}
@@ -533,14 +481,12 @@ export const InteractiveMap = ({
                 <span
                   className={cn(
                     "flex items-center justify-center rounded-full border-2 shadow-soft",
-                    isFocused
-                      ? "h-8 w-8 border-yellow-300 bg-brand-700 text-white"
-                      : location.isSmokingArea
-                        ? "h-6 w-6 border-white bg-gray-900 text-white"
-                        : "h-6 w-6 border-white bg-brand-700 text-white",
+                    location.isSmokingArea
+                      ? "h-6 w-6 border-white bg-gray-900 text-white"
+                      : "h-6 w-6 border-white bg-brand-700 text-white",
                   )}
                 >
-                  <CategoryIcon className={cn(isFocused ? "h-4 w-4" : "h-3.5 w-3.5")} />
+                  <CategoryIcon className="h-3.5 w-3.5" />
                 </span>
               </div>
             </div>
@@ -559,16 +505,12 @@ export const InteractiveMap = ({
         <button
           className={cn(
             "h-9 rounded-full px-4 text-sm font-bold transition",
-            viewMode === "current" ? "bg-brand-700 text-white" : "text-gray-600 hover:bg-gray-100",
+            viewMode === "featured" ? "bg-brand-700 text-white" : "text-gray-600 hover:bg-gray-100",
           )}
-          onClick={() => {
-            onCurrentLocationClick?.();
-            setViewMode("current");
-            applyTransform(getFocusedTransform(focusLocation, mapSize));
-          }}
+          onClick={() => setViewMode("featured")}
           type="button"
         >
-          현재 장소
+          주요 장소
         </button>
         <button
           className={cn(
@@ -616,54 +558,6 @@ export const InteractiveMap = ({
         </button>
       </div>
 
-      <div
-        className="absolute bottom-4 left-4 z-20 w-[min(14rem,calc(100%-2rem))]"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        {isOptionsOpen ? (
-          <div className="mb-2 rounded-lg bg-white/95 p-3 shadow-soft backdrop-blur">
-            <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
-              <input
-                checked={showAllLocations}
-                className="h-4 w-4 accent-brand-700"
-                onChange={(event) => setShowAllLocations(event.target.checked)}
-                type="checkbox"
-              />
-              모든 장소
-            </label>
-            <label className="flex min-h-8 items-center gap-2 text-sm font-semibold text-gray-700">
-              <input
-                checked={showSmokingAreas}
-                className="h-4 w-4 accent-brand-700"
-                onChange={(event) => setShowSmokingAreas(event.target.checked)}
-                type="checkbox"
-              />
-              흡연구역
-            </label>
-          </div>
-        ) : null}
-
-        <button
-          aria-expanded={isOptionsOpen}
-          className="flex min-h-10 w-full items-center justify-between gap-2 rounded-lg bg-white/95 px-3 py-2 text-sm font-bold text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
-          onClick={() => setIsOptionsOpen((isOpen) => !isOpen)}
-          type="button"
-        >
-          <span className="flex items-center gap-1.5">
-            <LocateFixed className="h-4 w-4" />
-            지도 옵션
-          </span>
-          {isOptionsOpen ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronUp className="h-4 w-4" />
-          )}
-        </button>
-      </div>
     </div>
   );
 };
