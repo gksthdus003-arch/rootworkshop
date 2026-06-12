@@ -108,7 +108,6 @@ export const InteractiveMap = ({
   const [showSmokingAreas, setShowSmokingAreas] = useState(true);
   const [selectedLocationId, setSelectedLocationId] = useState<string>();
   const [noticeMessage, setNoticeMessage] = useState("");
-  const [showPreGuideAction, setShowPreGuideAction] = useState(false);
   const [isControlMenuOpen, setIsControlMenuOpen] = useState(false);
   const [transform, setTransform] = useState<TransformState>(INITIAL_TRANSFORM);
   const [currentImageUrl, setCurrentImageUrl] = useState(imageUrl ?? fallbackImageUrl);
@@ -120,6 +119,19 @@ export const InteractiveMap = ({
     320,
     Math.min(viewportSize.width || fallbackMapSize, viewportSize.height || fallbackMapSize),
   );
+  const getInitialTransform = (): TransformState => {
+    const isMobileViewport = viewportSize.width > 0 && viewportSize.width < 768;
+
+    if (!isMobileViewport || mapSize <= 0 || viewportSize.height <= 0) {
+      return INITIAL_TRANSFORM;
+    }
+
+    return {
+      scale: clamp(Math.max(1.28, Math.min(viewportSize.height / mapSize, 1.65)), MIN_SCALE, MAX_SCALE),
+      x: 0,
+      y: 0,
+    };
+  };
 
   const getClampedTransform = (nextTransform: TransformState): TransformState => {
     const scale = clamp(nextTransform.scale, MIN_SCALE, MAX_SCALE);
@@ -172,7 +184,8 @@ export const InteractiveMap = ({
     () => new Set(visibleLocations.map((location) => location.id)),
     [visibleLocations],
   );
-  const canMoveToScheduleLocation = Boolean(guideStatus && schedule);
+  const canMoveToScheduleLocation = guideStatus === "live" && Boolean(schedule);
+  const shouldShowPreGuideBanner = guideStatus === "pre" && Boolean(onPreGuideClick);
 
   useLayoutEffect(() => {
     if (!viewportRef.current) {
@@ -217,8 +230,8 @@ export const InteractiveMap = ({
   }, [transform]);
 
   useEffect(() => {
-    applyTransform(INITIAL_TRANSFORM);
-  }, [mapSize, viewMode]);
+    applyTransform(getInitialTransform());
+  }, [mapSize, viewMode, viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
     setTransform((previous) => {
@@ -229,7 +242,7 @@ export const InteractiveMap = ({
   }, [mapSize, viewportSize.height, viewportSize.width]);
 
   const resetTransform = () => {
-    applyTransform(INITIAL_TRANSFORM);
+    applyTransform(getInitialTransform());
   };
 
   const moveToLocation = (location: MapLocation) => {
@@ -247,10 +260,7 @@ export const InteractiveMap = ({
 
   const findScheduleLocationTarget = () => {
     if (guideStatus === "pre") {
-      return {
-        message: "워크숍 시작 전입니다. 사전안내를 확인해주세요.",
-        showPreGuideAction: Boolean(onPreGuideClick),
-      };
+      return { message: "표시할 일정 장소가 없습니다." };
     }
 
     if (guideStatus === "closed") {
@@ -315,7 +325,6 @@ export const InteractiveMap = ({
     const target = findScheduleLocationTarget();
 
     setNoticeMessage(target.message);
-    setShowPreGuideAction(Boolean(target.showPreGuideAction));
 
     if (target.location) {
       moveToLocation(target.location);
@@ -659,7 +668,7 @@ export const InteractiveMap = ({
       </div>
 
       <div
-        className="absolute bottom-3 left-3 z-20 flex flex-col gap-1.5 sm:bottom-6"
+        className="absolute bottom-20 left-3 z-20 flex flex-col gap-1.5 sm:bottom-6"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => {
           event.preventDefault();
@@ -677,7 +686,7 @@ export const InteractiveMap = ({
         </button>
 
         {isControlMenuOpen ? (
-          <div className="grid w-26 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
+          <div className="grid w-28 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
             {canMoveToScheduleLocation ? (
               <button
                 className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-brand-700 px-1 text-white hover:bg-brand-800"
@@ -709,15 +718,20 @@ export const InteractiveMap = ({
           onPointerDown={(event) => event.stopPropagation()}
         >
           <span>{noticeMessage}</span>
-          {showPreGuideAction && onPreGuideClick ? (
-            <button
-              className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
-              onClick={onPreGuideClick}
-              type="button"
-            >
-              사전안내 보러가기
-            </button>
-          ) : null}
+        </div>
+      ) : shouldShowPreGuideBanner && onPreGuideClick ? (
+        <div
+          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <span>워크숍 시작 전입니다. 사전안내를 확인해주세요.</span>
+          <button
+            className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
+            onClick={onPreGuideClick}
+            type="button"
+          >
+            사전안내 보러가기
+          </button>
         </div>
       ) : null}
 

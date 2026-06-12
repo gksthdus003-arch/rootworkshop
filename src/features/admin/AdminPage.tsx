@@ -22,7 +22,6 @@ import {
 } from "../../lib/mapLocationCategories";
 import { useWorkshopStore } from "../../store/workshopStore";
 import type {
-  AnnouncementItem,
   EventItem,
   EventStatus,
   MapLocationCategory,
@@ -44,8 +43,7 @@ type AdminSectionId =
   | "map"
   | "schedule"
   | "events"
-  | "recommendations"
-  | "announcements";
+  | "recommendations";
 
 type EventTemplateId = "activity" | "bowling";
 
@@ -57,7 +55,6 @@ const adminSections: Array<{
   { id: "schedule", label: "일정" },
   { id: "events", label: "이벤트" },
   { id: "recommendations", label: "추천" },
-  { id: "announcements", label: "공지" },
 ];
 
 const eventStatusLabels: Record<EventStatus, string> = {
@@ -284,7 +281,6 @@ const createGuideFromDraft = (
 
 export const AdminPage = ({ onBack }: AdminPageProps) => {
   const {
-    addAnnouncement,
     addEvent,
     addEventTeam,
     addMapLocation,
@@ -295,7 +291,6 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     changeAdminPassword,
     createGuide,
     defaultGuide,
-    deleteAnnouncement,
     deleteEvent,
     deleteEventTeam,
     deleteGuide,
@@ -313,7 +308,6 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     selectedGuide,
     setDefaultGuide,
     unlockAdmin,
-    updateAnnouncement,
     updateEvent,
     updateEventTeam,
     updateGuide,
@@ -365,12 +359,6 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     category: "자유시간",
     imageUrl: "/assets/recommendation-eco-stream.png",
     isVisible: true,
-  });
-  const [announcementDraft, setAnnouncementDraft] = useState({
-    title: "",
-    body: "",
-    isImportant: false,
-    showOnHomeBanner: false,
   });
   const [groupDrafts, setGroupDrafts] = useState<
     Record<string, { teamName: string; membersText: string; memo: string }>
@@ -538,28 +526,6 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     });
   };
 
-  const handleAddAnnouncement = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!announcementDraft.title.trim()) {
-      return;
-    }
-
-    addAnnouncement(selectedGuide.id, {
-      id: createId("announcement"),
-      ...announcementDraft,
-      title: announcementDraft.title.trim(),
-      body: announcementDraft.body.trim(),
-      createdAt: new Date().toISOString(),
-    });
-    setAnnouncementDraft({
-      title: "",
-      body: "",
-      isImportant: false,
-      showOnHomeBanner: false,
-    });
-  };
-
   const handlePasswordChange = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -606,7 +572,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
   return (
     <section className="min-w-0 max-w-full space-y-4 overflow-x-hidden pb-6">
-      <div className="relative flex min-h-12 items-center justify-between gap-3 border-b border-gray-200 bg-white">
+      <div className="relative flex min-h-12 flex-col items-stretch gap-2 border-b border-gray-200 bg-white pb-3 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
         <label className="relative min-w-0 flex-1">
           <select
             aria-label="워크숍 회차 선택"
@@ -961,7 +927,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
       <nav className="overflow-x-hidden border-b border-gray-200 bg-white">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
-          {adminSections.map((section) => {
+          {adminSections.map((section, sectionIndex) => {
             const isActive = activeSection === section.id;
 
             return (
@@ -978,7 +944,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 >
                   {section.label}
                 </button>
-                {section.id !== "announcements" ? (
+                {sectionIndex < adminSections.length - 1 ? (
                   <span className="text-sm font-semibold text-gray-300">|</span>
                 ) : null}
               </div>
@@ -1019,7 +985,14 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
             </div>
           </div>
 
-          <div className={`${panelClass} overflow-hidden p-0`}>
+          <div className={`${panelClass} p-4 md:hidden`}>
+            <h2 className="font-bold">마커 위치 편집</h2>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              모바일에서는 드래그 편집을 사용하지 않습니다. 장소 카드의 수정에서 X/Y 좌표를 입력해 주세요.
+            </p>
+          </div>
+
+          <div className={`${panelClass} hidden overflow-hidden p-0 md:block`}>
             <div className="border-b border-gray-200 p-4">
               <h2 className="font-bold">마커 위치 편집</h2>
             </div>
@@ -1236,6 +1209,34 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             value={location.description ?? ""}
                           />
                         </label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label>
+                            <span className={labelClass}>X 좌표</span>
+                            <input
+                              className={fieldClass}
+                              onChange={(event) =>
+                                updateMapLocation(selectedGuide.id, location.id, {
+                                  xPercent: Number(event.target.value),
+                                })
+                              }
+                              type="number"
+                              value={location.xPercent}
+                            />
+                          </label>
+                          <label>
+                            <span className={labelClass}>Y 좌표</span>
+                            <input
+                              className={fieldClass}
+                              onChange={(event) =>
+                                updateMapLocation(selectedGuide.id, location.id, {
+                                  yPercent: Number(event.target.value),
+                                })
+                              }
+                              type="number"
+                              value={location.yPercent}
+                            />
+                          </label>
+                        </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
                             <input
@@ -1434,7 +1435,118 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
             <div className="border-b border-gray-200 p-4">
               <h2 className="font-bold">일정 목록</h2>
             </div>
-            <div className="overflow-x-auto">
+            <div className="space-y-3 p-4 md:hidden">
+              {selectedGuide.schedule.map((scheduleItem, index) => (
+                <section className="rounded-lg border border-gray-200 bg-white p-3" key={scheduleItem.id}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-gray-500">#{index + 1}</span>
+                    <div className="flex gap-1">
+                      <button
+                        aria-label="위로"
+                        className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+                        onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "up")}
+                        type="button"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        aria-label="아래로"
+                        className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+                        onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "down")}
+                        type="button"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-3">
+                    <label>
+                      <span className={labelClass}>시작</span>
+                      <input
+                        className={fieldClass}
+                        onChange={(event) =>
+                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
+                            startAt: getIsoDateTimeValue(event.target.value),
+                          })
+                        }
+                        type="datetime-local"
+                        value={getLocalDateTimeValue(scheduleItem.startAt)}
+                      />
+                    </label>
+                    <label>
+                      <span className={labelClass}>종료</span>
+                      <input
+                        className={fieldClass}
+                        onChange={(event) =>
+                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
+                            endAt: getIsoDateTimeValue(event.target.value),
+                          })
+                        }
+                        type="datetime-local"
+                        value={getLocalDateTimeValue(scheduleItem.endAt)}
+                      />
+                    </label>
+                    <label>
+                      <span className={labelClass}>제목</span>
+                      <input
+                        className={fieldClass}
+                        onChange={(event) =>
+                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
+                            title: event.target.value,
+                          })
+                        }
+                        value={scheduleItem.title}
+                      />
+                    </label>
+                    <label>
+                      <span className={labelClass}>설명</span>
+                      <input
+                        className={fieldClass}
+                        onChange={(event) =>
+                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
+                            description: event.target.value,
+                          })
+                        }
+                        value={scheduleItem.description}
+                      />
+                    </label>
+                    <label>
+                      <span className={labelClass}>장소</span>
+                      <input
+                        className={fieldClass}
+                        onChange={(event) =>
+                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
+                            location: event.target.value,
+                          })
+                        }
+                        value={scheduleItem.location}
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <Button
+                      onClick={() =>
+                        updateScheduleControl(selectedGuide.id, {
+                          mode: "manual",
+                          manualCurrentScheduleId: scheduleItem.id,
+                        })
+                      }
+                      variant="secondary"
+                    >
+                      현재 지정
+                    </Button>
+                    <Button
+                      icon={<Trash2 className="h-4 w-4" />}
+                      onClick={() => deleteScheduleItem(selectedGuide.id, scheduleItem.id)}
+                      variant="danger"
+                    >
+                      삭제
+                    </Button>
+                  </div>
+                </section>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-[64rem] text-left text-sm">
                 <thead className="bg-gray-50 text-gray-500">
                   <tr>
@@ -1818,7 +1930,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                 }
                                 value={question.label}
                               />
-                              <div className="flex gap-2">
+                              <div className="flex flex-wrap gap-2">
                                 <Button
                                   disabled={questionIndex === 0}
                                   icon={<ArrowUp className="h-4 w-4" />}
@@ -1930,7 +2042,41 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                     <div className="border-b border-gray-200 p-4">
                       <h3 className="font-bold">응답 관리</h3>
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="space-y-3 p-4 md:hidden">
+                      {selectedEventResponses.length > 0 ? (
+                        selectedEventResponses.map((response) => (
+                          <section className="rounded-lg border border-gray-200 bg-white p-3" key={response.id}>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="font-bold text-gray-950">{response.participantName}</p>
+                              <p className="text-xs font-semibold text-gray-500">
+                                {new Date(response.submittedAt).toLocaleString("ko-KR")}
+                              </p>
+                            </div>
+                            <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
+                              {Object.entries(response.answers).map(([questionId, answer]) => {
+                                const question = selectedAdminEvent.survey.find(
+                                  (item) => item.id === questionId,
+                                );
+
+                                return (
+                                  <p key={questionId}>
+                                    <span className="font-semibold text-gray-950">
+                                      {question?.label ?? questionId}:
+                                    </span>{" "}
+                                    {formatAnswerValue(answer)}
+                                  </p>
+                                );
+                              })}
+                            </div>
+                          </section>
+                        ))
+                      ) : (
+                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                          이 이벤트에 저장된 응답이 없습니다.
+                        </p>
+                      )}
+                    </div>
+                    <div className="hidden overflow-x-auto md:block">
                       <table className="w-full min-w-[48rem] text-left text-sm">
                         <thead className="bg-gray-50 text-gray-500">
                           <tr>
@@ -2128,7 +2274,56 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         )}
                       </div>
 
-                      <div className="mt-5 overflow-x-auto border-t border-gray-100 pt-4">
+                      <div className="mt-5 space-y-3 border-t border-gray-100 pt-4 md:hidden">
+                        {selectedEventResponses.length > 0 ? (
+                          selectedEventResponses.map((response) => {
+                            const assignedTeam =
+                              selectedAdminEvent.teams.find(
+                                (team) => team.id === response.assignedTeamId,
+                              ) ??
+                              selectedAdminEvent.teams.find((team) =>
+                                team.members.includes(response.participantName),
+                              );
+
+                            return (
+                              <section
+                                className="rounded-lg border border-gray-200 bg-white p-3"
+                                key={response.id}
+                              >
+                                <p className="font-bold text-gray-950">{response.participantName}</p>
+                                <label className="mt-3 block">
+                                  <span className={labelClass}>배정 조</span>
+                                  <select
+                                    className={fieldClass}
+                                    onChange={(selectEvent) =>
+                                      assignEventResponseTeam(
+                                        selectedGuide.id,
+                                        selectedAdminEvent.id,
+                                        response.participantName,
+                                        selectEvent.target.value || undefined,
+                                      )
+                                    }
+                                    value={assignedTeam?.id ?? ""}
+                                  >
+                                    <option value="">미배정</option>
+                                    {selectedAdminEvent.teams.map((team) => (
+                                      <option key={team.id} value={team.id}>
+                                        {team.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </section>
+                            );
+                          })
+                        ) : (
+                          <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                            조를 배정할 응답자가 없습니다.
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="mt-5 hidden overflow-x-auto border-t border-gray-100 pt-4 md:block">
                         <table className="w-full min-w-[38rem] text-left text-sm">
                           <thead className="text-gray-500">
                             <tr>
@@ -2301,8 +2496,8 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
           <div className="grid gap-3 lg:grid-cols-2">
             {selectedGuide.recommendations.map((recommendation) => (
               <section className={panelClass} key={recommendation.id}>
-                <div className="flex gap-3">
-                  <div className="h-20 w-28 shrink-0 overflow-hidden rounded-lg bg-gray-100">
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="h-32 w-full shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:h-20 sm:w-28">
                     <img
                       alt=""
                       className="h-full w-full object-cover"
@@ -2363,7 +2558,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   rows={3}
                   value={recommendation.description}
                 />
-                <div className="mt-3 flex flex-wrap justify-between gap-2">
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                   <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
                     <input
                       checked={recommendation.isVisible}
@@ -2377,137 +2572,13 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                     노출
                   </label>
                   <Button
+                    className="w-full sm:w-auto"
                     icon={<Trash2 className="h-4 w-4" />}
                     onClick={() => deleteRecommendation(selectedGuide.id, recommendation.id)}
                     variant="danger"
                   >
                     삭제
                   </Button>
-                </div>
-              </section>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {activeSection === "announcements" ? (
-        <div className="space-y-4">
-          <form className={panelClass} onSubmit={handleAddAnnouncement}>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-bold">공지 등록</h2>
-              <Button icon={<Plus className="h-4 w-4" />} type="submit">
-                추가
-              </Button>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <label>
-                <span className={labelClass}>제목</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setAnnouncementDraft({ ...announcementDraft, title: event.target.value })
-                  }
-                  value={announcementDraft.title}
-                />
-              </label>
-              <div className="flex items-end gap-4">
-                <label className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-gray-700">
-                  <input
-                    checked={announcementDraft.isImportant}
-                    onChange={(event) =>
-                      setAnnouncementDraft({
-                        ...announcementDraft,
-                        isImportant: event.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                  중요
-                </label>
-                <label className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-gray-700">
-                  <input
-                    checked={announcementDraft.showOnHomeBanner}
-                    onChange={(event) =>
-                      setAnnouncementDraft({
-                        ...announcementDraft,
-                        showOnHomeBanner: event.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                  배너
-                </label>
-              </div>
-              <label className="md:col-span-2">
-                <span className={labelClass}>내용</span>
-                <textarea
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setAnnouncementDraft({ ...announcementDraft, body: event.target.value })
-                  }
-                  rows={3}
-                  value={announcementDraft.body}
-                />
-              </label>
-            </div>
-          </form>
-
-          <div className="space-y-3">
-            {selectedGuide.announcements.map((announcement) => (
-              <section className={panelClass} key={announcement.id}>
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                  <input
-                    className={compactFieldClass}
-                    onChange={(event) =>
-                      updateAnnouncement(selectedGuide.id, announcement.id, {
-                        title: event.target.value,
-                      })
-                    }
-                    value={announcement.title}
-                  />
-                  <Button
-                    icon={<Trash2 className="h-4 w-4" />}
-                    onClick={() => deleteAnnouncement(selectedGuide.id, announcement.id)}
-                    variant="danger"
-                  >
-                    삭제
-                  </Button>
-                </div>
-                <textarea
-                  className={`${compactFieldClass} mt-3`}
-                  onChange={(event) =>
-                    updateAnnouncement(selectedGuide.id, announcement.id, {
-                      body: event.target.value,
-                    })
-                  }
-                  rows={3}
-                  value={announcement.body}
-                />
-                <div className="mt-3 flex flex-wrap gap-4">
-                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                    <input
-                      checked={announcement.isImportant}
-                      onChange={(event) =>
-                        updateAnnouncement(selectedGuide.id, announcement.id, {
-                          isImportant: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                    중요 공지
-                  </label>
-                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                    <input
-                      checked={announcement.showOnHomeBanner}
-                      onChange={(event) =>
-                        updateAnnouncement(selectedGuide.id, announcement.id, {
-                          showOnHomeBanner: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                    홈 배너
-                  </label>
                 </div>
               </section>
             ))}
