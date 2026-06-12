@@ -40,11 +40,13 @@ interface WorkshopStoreValue {
   updateGuide: (guideId: string, updates: Partial<WorkshopGuide>) => void;
   deleteGuide: (guideId: string) => void;
   setDefaultGuide: (guideId: string) => void;
+  addMapLocation: (guideId: string, location: MapLocation) => void;
   updateMapLocation: (
     guideId: string,
     locationId: string,
     updates: Partial<MapLocation>,
   ) => void;
+  deleteMapLocation: (guideId: string, locationId: string) => void;
   addScheduleItem: (guideId: string, scheduleItem: ScheduleItem) => void;
   updateScheduleItem: (
     guideId: string,
@@ -107,6 +109,25 @@ interface WorkshopStoreValue {
 
 const WorkshopStoreContext = createContext<WorkshopStoreValue | null>(null);
 
+const getInitialActiveTab = (): BottomTabId => {
+  if (typeof window === "undefined") {
+    return "map";
+  }
+
+  const tab = new URLSearchParams(window.location.search).get("tab");
+
+  if (
+    tab === "map" ||
+    tab === "schedule" ||
+    tab === "events" ||
+    tab === "recommendations"
+  ) {
+    return tab;
+  }
+
+  return "map";
+};
+
 export const WorkshopProvider = ({ children }: PropsWithChildren) => {
   const [guides, setGuides] = useState(() => mockWorkshopRepository.listGuides());
   const defaultGuide = useMemo(
@@ -119,7 +140,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
   const [participantProfile, setParticipantProfile] = useState<ParticipantProfile | undefined>(() =>
     mockWorkshopRepository.getParticipantProfile(),
   );
-  const [activeTab, setActiveTab] = useState<BottomTabId>("map");
+  const [activeTab, setActiveTab] = useState<BottomTabId>(() => getInitialActiveTab());
   const [scheduleFocusRequestId, setScheduleFocusRequestId] = useState(0);
   const [participants, setParticipants] = useState(() =>
     mockWorkshopRepository.listParticipants(),
@@ -240,6 +261,16 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       );
     };
 
+    const addMapLocation = (guideId: string, location: MapLocation) => {
+      updateGuideById(guideId, (guide) => ({
+        ...guide,
+        map: {
+          ...guide.map,
+          locations: [...guide.map.locations, location],
+        },
+      }));
+    };
+
     const updateMapLocation = (
       guideId: string,
       locationId: string,
@@ -252,6 +283,16 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
           locations: guide.map.locations.map((location) =>
             location.id === locationId ? { ...location, ...updates } : location,
           ),
+        },
+      }));
+    };
+
+    const deleteMapLocation = (guideId: string, locationId: string) => {
+      updateGuideById(guideId, (guide) => ({
+        ...guide,
+        map: {
+          ...guide.map,
+          locations: guide.map.locations.filter((location) => location.id !== locationId),
         },
       }));
     };
@@ -663,7 +704,9 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       updateGuide,
       deleteGuide,
       setDefaultGuide,
+      addMapLocation,
       updateMapLocation,
+      deleteMapLocation,
       addScheduleItem,
       updateScheduleItem,
       deleteScheduleItem,

@@ -1,4 +1,5 @@
 import { getDefaultGuide as getMockDefaultGuide, mockAdminConfig, mockWorkshopGuides } from "../data/mockData";
+import { inferMapLocationCategory } from "../lib/mapLocationCategories";
 import { readFromStorage, storageKeys, writeToStorage } from "../lib/storage";
 import type {
   AnnouncementItem,
@@ -6,10 +7,13 @@ import type {
   EventStatus,
   EventTeam,
   EventSurveyResponse,
+  MapLocation,
   ParticipantProfile,
+  PosterConfig,
   RecommendationItem,
   SurveyQuestion,
   WorkshopGuide,
+  WorkshopStatus,
 } from "../types/workshop";
 
 export interface WorkshopRepository {
@@ -41,6 +45,23 @@ const createId = (prefix: string) => {
 };
 
 const validEventStatuses: EventStatus[] = ["waiting", "active", "closed"];
+const validWorkshopStatuses: WorkshopStatus[] = ["pre", "live", "closed"];
+
+const normalizePoster = (
+  poster: PosterConfig | undefined,
+  fallbackPoster?: PosterConfig,
+): PosterConfig => ({
+  enabled: poster?.enabled ?? fallbackPoster?.enabled ?? false,
+  imageUrl: poster?.imageUrl ?? fallbackPoster?.imageUrl ?? "",
+  version: poster?.version || fallbackPoster?.version || "poster-v1",
+  durationMs: Number.isFinite(poster?.durationMs)
+    ? Math.max(Number(poster?.durationMs), 500)
+    : fallbackPoster?.durationMs ?? 2000,
+  showOnPreFirstVisit:
+    poster?.showOnPreFirstVisit ?? fallbackPoster?.showOnPreFirstVisit ?? true,
+  showOnDay1FirstVisit:
+    poster?.showOnDay1FirstVisit ?? fallbackPoster?.showOnDay1FirstVisit ?? true,
+});
 
 const normalizeSurvey = (survey: SurveyQuestion[] | undefined): SurveyQuestion[] =>
   Array.isArray(survey)
@@ -119,40 +140,96 @@ const normalizeAnnouncement = (
   createdAt: announcement.createdAt || new Date().toISOString(),
 });
 
-const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => ({
-  id: guide.id || createId("guide"),
-  round: guide.round || index + 1,
-  year: guide.year || new Date().getFullYear(),
-  title: guide.title || `${guide.year || new Date().getFullYear()} 워크숍 가이드`,
-  subtitle: guide.subtitle || "",
-  periodLabel: guide.periodLabel || "",
-  locationLabel: guide.locationLabel || "",
-  isDefault: guide.isDefault ?? index === 0,
-  isPublished: guide.isPublished ?? true,
-  scheduleControl: guide.scheduleControl ?? {
-    mode: "auto",
-    manualCurrentScheduleId: undefined,
-  },
-  schedule: Array.isArray(guide.schedule) ? guide.schedule : [],
-  map: {
-    title: guide.map?.title || "워크숍 안내 지도",
-    imageUrl: guide.map?.imageUrl || "/assets/konjiam-map-base.png",
-    locations: Array.isArray(guide.map?.locations) ? guide.map.locations : [],
-  },
-  events: Array.isArray(guide.events)
-    ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
-    : [],
-  recommendations: Array.isArray(guide.recommendations)
-    ? guide.recommendations.map((recommendation, recommendationIndex) =>
-        normalizeRecommendation(recommendation, recommendationIndex),
-      )
-    : [],
-  announcements: Array.isArray(guide.announcements)
-    ? guide.announcements.map((announcement, announcementIndex) =>
-        normalizeAnnouncement(announcement, announcementIndex),
-      )
-    : [],
-});
+const normalizeMapLocation = (location: MapLocation, index: number): MapLocation => {
+  const normalizedLocation = {
+    id: location.id || `location-${index + 1}`,
+    name: location.name || "장소",
+    category: location.category,
+    xPercent: Number.isFinite(location.xPercent) ? location.xPercent : 50,
+    yPercent: Number.isFinite(location.yPercent) ? location.yPercent : 50,
+    isWorkshopLocation: location.isWorkshopLocation ?? false,
+    isSmokingArea: location.isSmokingArea ?? false,
+  };
+
+  return {
+    ...normalizedLocation,
+    category:
+      normalizedLocation.category ??
+      inferMapLocationCategory({
+        id: normalizedLocation.id,
+        name: normalizedLocation.name,
+        isSmokingArea: normalizedLocation.isSmokingArea,
+      }),
+  };
+};
+
+const shouldUseDefault2026Schedule = (guide: WorkshopGuide) => guide.id === "workshop-2026";
+
+const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => {
+  const shouldUseMockSchedule = shouldUseDefault2026Schedule(guide);
+  const mockDefaultGuide = shouldUseMockSchedule ? getMockDefaultGuide() : undefined;
+  const fallbackStartDate = guide.schedule?.[0]?.startAt ?? new Date().toISOString();
+
+  return {
+    id: guide.id || createId("guide"),
+    round: guide.round || index + 1,
+    year: guide.year || new Date().getFullYear(),
+    title: guide.title || `${guide.year || new Date().getFullYear()} 워크숍 가이드`,
+    subtitle: guide.subtitle || "",
+    periodLabel: guide.periodLabel || "",
+    startDate: guide.startDate || mockDefaultGuide?.startDate || fallbackStartDate,
+    status: validWorkshopStatuses.includes(guide.status)
+      ? guide.status
+      : mockDefaultGuide?.status ?? "live",
+    locationLabel: guide.locationLabel || "",
+    preparationItems: Array.isArray(guide.preparationItems)
+      ? guide.preparationItems
+      : mockDefaultGuide?.preparationItems ?? [],
+    venueAddress: guide.venueAddress || mockDefaultGuide?.venueAddress || "",
+    transportationGuide:
+      guide.transportationGuide || mockDefaultGuide?.transportationGuide || "",
+    mapLinkUrl: guide.mapLinkUrl || mockDefaultGuide?.mapLinkUrl,
+    poster: normalizePoster(guide.poster, mockDefaultGuide?.poster),
+    isDefault: guide.isDefault ?? index === 0,
+    isPublished: guide.isPublished ?? true,
+    scheduleControl: shouldUseMockSchedule
+      ? mockDefaultGuide?.scheduleControl ?? {
+          mode: "auto",
+          manualCurrentScheduleId: undefined,
+        }
+      : guide.scheduleControl ?? {
+          mode: "auto",
+          manualCurrentScheduleId: undefined,
+        },
+    schedule: shouldUseMockSchedule
+      ? mockDefaultGuide?.schedule ?? []
+      : Array.isArray(guide.schedule)
+        ? guide.schedule
+        : [],
+    map: {
+      title: guide.map?.title || "워크숍 안내 지도",
+      imageUrl: guide.map?.imageUrl || "/assets/konjiam-map-base.png",
+      locations: Array.isArray(guide.map?.locations)
+        ? guide.map.locations.map((location, locationIndex) =>
+            normalizeMapLocation(location, locationIndex),
+          )
+        : [],
+    },
+    events: Array.isArray(guide.events)
+      ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
+      : [],
+    recommendations: Array.isArray(guide.recommendations)
+      ? guide.recommendations.map((recommendation, recommendationIndex) =>
+          normalizeRecommendation(recommendation, recommendationIndex),
+        )
+      : [],
+    announcements: Array.isArray(guide.announcements)
+      ? guide.announcements.map((announcement, announcementIndex) =>
+          normalizeAnnouncement(announcement, announcementIndex),
+        )
+      : [],
+  };
+};
 
 const normalizeGuides = (guides: WorkshopGuide[]) => {
   const normalizedGuides = guides.map((guide, index) => normalizeGuide(guide, index));

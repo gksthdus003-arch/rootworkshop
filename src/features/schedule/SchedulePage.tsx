@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { CalendarDays, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { formatScheduleTime, sortScheduleByTime } from "../../lib/schedule";
 import { useCurrentSchedule } from "../../hooks/useCurrentSchedule";
@@ -13,6 +13,8 @@ const getCategoryLabel = (category: ScheduleItem["category"]) => {
     break: "휴식",
     meal: "식사",
     activity: "활동",
+    event: "이벤트",
+    free: "자유",
     notice: "공지",
   };
 
@@ -21,8 +23,22 @@ const getCategoryLabel = (category: ScheduleItem["category"]) => {
 
 export const SchedulePage = () => {
   const { scheduleFocusRequestId, selectedGuide } = useWorkshopStore();
-  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sortedSchedule = sortScheduleByTime(selectedGuide.schedule);
+  const scheduleGroups = sortedSchedule.reduce<Array<{ dateKey: string; items: ScheduleItem[] }>>(
+    (groups, schedule) => {
+      const dateKey = schedule.startAt.slice(0, 10);
+      const lastGroup = groups[groups.length - 1];
+
+      if (lastGroup?.dateKey === dateKey) {
+        lastGroup.items.push(schedule);
+        return groups;
+      }
+
+      return [...groups, { dateKey, items: [schedule] }];
+    },
+    [],
+  );
   const { displaySchedule, highlightScheduleId, isManualOverride, statusLabel } =
     useCurrentSchedule(selectedGuide.schedule, selectedGuide.scheduleControl);
   const focusScheduleId = highlightScheduleId ?? displaySchedule?.id;
@@ -41,113 +57,100 @@ export const SchedulePage = () => {
   }, [focusScheduleId, scheduleFocusRequestId]);
 
   return (
-    <section className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">일정</h1>
-        <p className="mt-1 text-sm text-gray-600">{selectedGuide.periodLabel}</p>
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-soft">
+        <p className="min-w-0 truncate text-xs font-semibold text-gray-500">
+          {displaySchedule
+            ? `${statusLabel} · ${displaySchedule.title}`
+            : selectedGuide.periodLabel}
+        </p>
+        {isManualOverride ? (
+          <span className="shrink-0 rounded-full bg-yellow-100 px-2 py-0.5 text-[11px] font-bold text-yellow-800">
+            수동 지정
+          </span>
+        ) : null}
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white shadow-soft">
-        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <CalendarDays className="h-5 w-5 shrink-0 text-brand-700" />
-            <div className="min-w-0">
-              <p className="font-bold">전체 일정</p>
-              <p className="truncate text-xs text-gray-500">
-                {displaySchedule
-                  ? `${statusLabel} · ${displaySchedule.title}`
-                  : "현재 표시할 일정이 없습니다."}
-              </p>
-            </div>
-          </div>
-          {isManualOverride ? (
-            <span className="rounded-full bg-yellow-100 px-2.5 py-1 text-xs font-bold text-yellow-800">
-              수동 지정
-            </span>
-          ) : null}
-        </div>
+      {scheduleGroups.length > 0 ? (
+        <div className="space-y-3">
+          {scheduleGroups.map((group, groupIndex) => (
+            <section
+              className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-soft"
+              key={group.dateKey}
+            >
+              <div className="border-b border-gray-100 bg-gray-50 px-3 py-2">
+                <h2 className="text-base font-bold text-gray-950">{groupIndex + 1}일차</h2>
+              </div>
 
-        {sortedSchedule.length > 0 ? (
-          <table className="w-full table-fixed text-left text-sm">
-            <colgroup>
-              <col className="w-[6.5rem] sm:w-36" />
-              <col />
-              <col className="w-[5.5rem] sm:w-32" />
-            </colgroup>
-            <thead className="bg-gray-50 text-xs font-bold text-gray-500">
-              <tr>
-                <th className="px-3 py-3 sm:px-4">시간</th>
-                <th className="px-2 py-3 sm:px-4">제목 + 설명</th>
-                <th className="px-2 py-3 sm:px-4">장소</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedSchedule.map((schedule) => {
-                const isHighlighted = highlightScheduleId === schedule.id;
+              <div className="divide-y divide-gray-100">
+                {group.items.map((schedule) => {
+                  const isHighlighted = highlightScheduleId === schedule.id;
 
-                return (
-                  <tr
-                    className={cn(
-                      "scroll-mt-36 border-t border-gray-100 transition",
-                      isHighlighted
-                        ? "border-l-4 border-l-brand-700 bg-brand-50"
-                        : "border-l-4 border-l-transparent bg-white",
-                    )}
-                    key={schedule.id}
-                    ref={(element) => {
-                      rowRefs.current[schedule.id] = element;
-                    }}
-                  >
-                    <td
+                  return (
+                    <div
                       className={cn(
-                        "px-3 py-4 align-top text-xs font-semibold sm:px-4 sm:text-sm",
-                        isHighlighted ? "text-brand-900" : "text-gray-600",
+                        "scroll-mt-24 border-l-4 px-3 py-3 transition",
+                        isHighlighted
+                          ? "border-l-brand-700 bg-brand-50"
+                          : "border-l-transparent bg-white",
                       )}
+                      key={schedule.id}
+                      ref={(element) => {
+                        rowRefs.current[schedule.id] = element;
+                      }}
                     >
-                      {formatScheduleTime(schedule)}
-                    </td>
-                    <td className="min-w-0 px-2 py-4 align-top sm:px-4">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
+                      <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 sm:grid-cols-[7rem_minmax(0,1fr)]">
+                        <p
                           className={cn(
-                            "hidden rounded-full px-2 py-1 text-[11px] font-bold sm:inline-flex",
-                            isHighlighted
-                              ? "bg-brand-700 text-white"
-                              : "bg-gray-100 text-gray-600",
+                            "whitespace-nowrap text-xs font-bold leading-5",
+                            isHighlighted ? "text-brand-900" : "text-gray-600",
                           )}
                         >
-                          {getCategoryLabel(schedule.category)}
-                        </span>
-                        <p className="min-w-0 truncate font-bold text-gray-950">
-                          {schedule.title}
+                          {formatScheduleTime(schedule)}
                         </p>
+
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold",
+                                isHighlighted
+                                  ? "bg-brand-700 text-white"
+                                  : "bg-gray-100 text-gray-600",
+                              )}
+                            >
+                              {getCategoryLabel(schedule.category)}
+                            </span>
+                            <p className="min-w-0 truncate text-sm font-bold text-gray-950">
+                              {schedule.title}
+                            </p>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">
+                            {schedule.description}
+                          </p>
+                          <div
+                            className={cn(
+                              "mt-1 flex min-w-0 items-center gap-1.5 text-xs font-semibold",
+                              isHighlighted ? "text-brand-900" : "text-gray-700",
+                            )}
+                          >
+                            <MapPin className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{schedule.location}</span>
+                          </div>
+                        </div>
                       </div>
-                      <p className="mt-1 truncate text-xs text-gray-500">
-                        {schedule.description}
-                      </p>
-                    </td>
-                    <td className="px-2 py-4 align-top sm:px-4">
-                      <div
-                        className={cn(
-                          "flex min-w-0 items-center gap-1.5 text-xs font-semibold sm:text-sm",
-                          isHighlighted ? "text-brand-900" : "text-gray-700",
-                        )}
-                      >
-                        <MapPin className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{schedule.location}</span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div className="px-4 py-10 text-center text-sm text-gray-500">
-            등록된 일정이 없습니다.
-          </div>
-        )}
-      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-gray-200 bg-white px-4 py-10 text-center text-sm text-gray-500 shadow-soft">
+          등록된 일정이 없습니다.
+        </div>
+      )}
     </section>
   );
 };

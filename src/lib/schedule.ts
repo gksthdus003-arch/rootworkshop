@@ -9,6 +9,7 @@ export const formatClockTime = (dateValue: string) => {
 };
 
 export const formatScheduleTime = (schedule: ScheduleItem) =>
+  schedule.displayTime ??
   `${formatClockTime(schedule.startAt)} - ${formatClockTime(schedule.endAt)}`;
 
 export const sortScheduleByTime = (schedule: ScheduleItem[]) =>

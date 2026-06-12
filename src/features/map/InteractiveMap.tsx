@@ -1,10 +1,7 @@
 import {
-  Building2,
   ChevronDown,
   ChevronUp,
-  Cigarette,
   LocateFixed,
-  MapPin,
   Minus,
   Plus,
   RotateCcw,
@@ -19,6 +16,7 @@ import {
   useState,
 } from "react";
 import { cn } from "../../lib/cn";
+import { getMapLocationCategoryIcon } from "../../lib/mapLocationCategories";
 import type { MapLocation } from "../../types/workshop";
 
 type ViewMode = "current" | "all";
@@ -56,6 +54,9 @@ interface InteractiveMapProps {
   fallbackImageUrl?: string;
   locations: MapLocation[];
   focusLocationId?: string;
+  onCurrentLocationClick?: () => void;
+  isLocationEditingEnabled?: boolean;
+  onLocationPositionChange?: (locationId: string, position: { xPercent: number; yPercent: number }) => void;
 }
 
 const MIN_SCALE = 1;
@@ -87,17 +88,26 @@ const getFocusedTransform = (location: MapLocation | undefined, mapSize: number)
   };
 };
 
+const areTransformsEqual = (first: TransformState, second: TransformState) =>
+  first.scale === second.scale && first.x === second.x && first.y === second.y;
+
+const roundPercent = (value: number) => Math.round(value * 10) / 10;
+
 export const InteractiveMap = ({
   title,
   imageUrl,
   fallbackImageUrl,
   locations,
   focusLocationId,
+  onCurrentLocationClick,
+  isLocationEditingEnabled = false,
+  onLocationPositionChange,
 }: InteractiveMapProps) => {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pointersRef = useRef(new Map<number, PointerPoint>());
   const gestureRef = useRef<GestureState | null>(null);
   const transformRef = useRef<TransformState>(INITIAL_TRANSFORM);
+  const draggedLocationIdRef = useRef<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [viewMode, setViewMode] = useState<ViewMode>("current");
   const [showAllLocations, setShowAllLocations] = useState(false);
@@ -115,6 +125,32 @@ export const InteractiveMap = ({
   );
   const focusLocation = locations.find((location) => location.id === focusLocationId);
 
+  const getClampedTransform = (nextTransform: TransformState): TransformState => {
+    const scale = clamp(nextTransform.scale, MIN_SCALE, MAX_SCALE);
+
+    if (viewportSize.width <= 0 || viewportSize.height <= 0 || mapSize <= 0) {
+      return {
+        scale,
+        x: nextTransform.x,
+        y: nextTransform.y,
+      };
+    }
+
+    const scaledMapSize = mapSize * scale;
+    const maxX = Math.max(0, (scaledMapSize - viewportSize.width) / 2);
+    const maxY = Math.max(0, (scaledMapSize - viewportSize.height) / 2);
+
+    return {
+      scale,
+      x: maxX === 0 ? 0 : clamp(nextTransform.x, -maxX, maxX),
+      y: maxY === 0 ? 0 : clamp(nextTransform.y, -maxY, maxY),
+    };
+  };
+
+  const applyTransform = (nextTransform: TransformState) => {
+    setTransform(getClampedTransform(nextTransform));
+  };
+
   const visibleLocations = useMemo(
     () =>
       locations.filter((location) => {
@@ -126,9 +162,9 @@ export const InteractiveMap = ({
           return true;
         }
 
-        return location.isWorkshopLocation;
+        return location.isWorkshopLocation || location.id === focusLocation?.id;
       }),
-    [locations, showAllLocations, showSmokingAreas],
+    [focusLocation?.id, locations, showAllLocations, showSmokingAreas],
   );
 
   useLayoutEffect(() => {
@@ -175,19 +211,27 @@ export const InteractiveMap = ({
 
   useEffect(() => {
     if (viewMode === "current") {
-      setTransform(getFocusedTransform(focusLocation, mapSize));
+      applyTransform(getFocusedTransform(focusLocation, mapSize));
       return;
     }
 
-    setTransform(INITIAL_TRANSFORM);
+    applyTransform(INITIAL_TRANSFORM);
   }, [focusLocation?.id, mapSize, viewMode]);
 
+  useEffect(() => {
+    setTransform((previous) => {
+      const clampedTransform = getClampedTransform(previous);
+
+      return areTransformsEqual(previous, clampedTransform) ? previous : clampedTransform;
+    });
+  }, [mapSize, viewportSize.height, viewportSize.width]);
+
   const resetTransform = () => {
-    setTransform(viewMode === "current" ? getFocusedTransform(focusLocation, mapSize) : INITIAL_TRANSFORM);
+    applyTransform(viewMode === "current" ? getFocusedTransform(focusLocation, mapSize) : INITIAL_TRANSFORM);
   };
 
   const updateScale = (scaleDelta: number) => {
-    setTransform((previous) => ({
+    setTransform((previous) => getClampedTransform({
       ...previous,
       scale: clamp(previous.scale + scaleDelta, MIN_SCALE, MAX_SCALE),
     }));
@@ -272,7 +316,7 @@ export const InteractiveMap = ({
         MAX_SCALE,
       );
 
-      setTransform({
+      applyTransform({
         scale,
         x: gesture.origin.x + center.x - gesture.startCenter.x,
         y: gesture.origin.y + center.y - gesture.startCenter.y,
@@ -286,7 +330,7 @@ export const InteractiveMap = ({
       return;
     }
 
-    setTransform({
+    applyTransform({
       scale: gesture.origin.scale,
       x: gesture.origin.x + point.x - gesture.startX,
       y: gesture.origin.y + point.y - gesture.startY,
@@ -310,12 +354,84 @@ export const InteractiveMap = ({
     gestureRef.current = null;
   };
 
+  const getLocationPositionFromPointer = (event: ReactPointerEvent<HTMLElement>) => {
+    const rect = viewportRef.current?.getBoundingClientRect();
+
+    if (!rect || mapSize <= 0) {
+      return;
+    }
+
+    const currentTransform = transformRef.current;
+    const mapCenterX = rect.left + rect.width / 2 + currentTransform.x;
+    const mapCenterY = rect.top + rect.height / 2 + currentTransform.y;
+    const x = (event.clientX - mapCenterX) / currentTransform.scale + mapSize / 2;
+    const y = (event.clientY - mapCenterY) / currentTransform.scale + mapSize / 2;
+
+    return {
+      xPercent: roundPercent(clamp((x / mapSize) * 100, 0, 100)),
+      yPercent: roundPercent(clamp((y / mapSize) * 100, 0, 100)),
+    };
+  };
+
+  const startLocationDrag = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    locationId: string,
+  ) => {
+    if (!isLocationEditingEnabled || event.pointerType !== "mouse" || !onLocationPositionChange) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    draggedLocationIdRef.current = locationId;
+    pointersRef.current.clear();
+    gestureRef.current = null;
+
+    const nextPosition = getLocationPositionFromPointer(event);
+
+    if (nextPosition) {
+      onLocationPositionChange(locationId, nextPosition);
+    }
+  };
+
+  const updateLocationDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const locationId = draggedLocationIdRef.current;
+
+    if (!locationId || !onLocationPositionChange) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const nextPosition = getLocationPositionFromPointer(event);
+
+    if (nextPosition) {
+      onLocationPositionChange(locationId, nextPosition);
+    }
+  };
+
+  const stopLocationDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggedLocationIdRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    draggedLocationIdRef.current = null;
+  };
+
   const inverseScale = 1 / transform.scale;
 
   return (
     <div
       aria-label={title}
-      className="relative h-full w-full overflow-hidden bg-[#dce8c8]"
+      className="relative h-full w-full overflow-hidden bg-[#dce8c8] [clip-path:inset(0)]"
       onPointerCancel={stopPointerGesture}
       onPointerDown={handlePointerDown}
       onPointerLeave={stopPointerGesture}
@@ -327,7 +443,7 @@ export const InteractiveMap = ({
       style={{ overscrollBehavior: "none", touchAction: "none" }}
     >
       <div
-        className="absolute left-1/2 top-1/2 origin-center select-none"
+        className="absolute left-1/2 top-1/2 origin-center select-none overflow-hidden"
         style={{
           height: mapSize,
           left: `calc(50% + ${transform.x}px)`,
@@ -339,7 +455,7 @@ export const InteractiveMap = ({
         {currentImageUrl ? (
           <img
             alt={title}
-            className="h-full w-full object-contain"
+            className="block h-full w-full object-contain"
             draggable={false}
             onError={() => {
               if (fallbackImageUrl && currentImageUrl !== fallbackImageUrl) {
@@ -375,15 +491,24 @@ export const InteractiveMap = ({
         ) : null}
 
         {visibleLocations.map((location) => {
+          const CategoryIcon = getMapLocationCategoryIcon(location.category);
           const isFocused = location.id === focusLocation?.id;
 
           return (
             <div
-              className="absolute"
+              className={cn(
+                "absolute",
+                isLocationEditingEnabled ? "cursor-grab active:cursor-grabbing" : "",
+              )}
               key={location.id}
+              onPointerCancel={stopLocationDrag}
+              onPointerDown={(event) => startLocationDrag(event, location.id)}
+              onPointerMove={updateLocationDrag}
+              onPointerUp={stopLocationDrag}
               style={{
                 left: `${location.xPercent}%`,
                 top: `${location.yPercent}%`,
+                zIndex: isFocused ? 30 : location.isWorkshopLocation ? 20 : 10,
               }}
             >
               <div
@@ -395,33 +520,27 @@ export const InteractiveMap = ({
               >
                 <span
                   className={cn(
-                    "max-w-36 truncate rounded-full px-2.5 py-1 text-[11px] font-bold shadow-soft",
+                    "max-w-28 truncate rounded-full px-2 py-0.5 font-bold shadow-soft",
                     isFocused
-                      ? "bg-yellow-300 text-gray-950"
+                      ? "text-[11px] bg-yellow-300 text-gray-950"
                       : location.isSmokingArea
-                        ? "bg-gray-900 text-white"
-                        : "bg-white text-brand-900",
+                        ? "bg-gray-900 text-[10px] text-white"
+                        : "bg-white text-[10px] text-brand-900",
                   )}
                 >
                   {location.name}
                 </span>
                 <span
                   className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-full border-2 shadow-soft",
+                    "flex items-center justify-center rounded-full border-2 shadow-soft",
                     isFocused
-                      ? "border-yellow-300 bg-brand-700 text-white"
+                      ? "h-8 w-8 border-yellow-300 bg-brand-700 text-white"
                       : location.isSmokingArea
-                        ? "border-white bg-gray-900 text-white"
-                        : "border-white bg-brand-700 text-white",
+                        ? "h-6 w-6 border-white bg-gray-900 text-white"
+                        : "h-6 w-6 border-white bg-brand-700 text-white",
                   )}
                 >
-                  {location.isSmokingArea ? (
-                    <Cigarette className="h-4 w-4" />
-                  ) : location.isWorkshopLocation ? (
-                    <Building2 className="h-4 w-4" />
-                  ) : (
-                    <MapPin className="h-4 w-4" />
-                  )}
+                  <CategoryIcon className={cn(isFocused ? "h-4 w-4" : "h-3.5 w-3.5")} />
                 </span>
               </div>
             </div>
@@ -442,7 +561,11 @@ export const InteractiveMap = ({
             "h-9 rounded-full px-4 text-sm font-bold transition",
             viewMode === "current" ? "bg-brand-700 text-white" : "text-gray-600 hover:bg-gray-100",
           )}
-          onClick={() => setViewMode("current")}
+          onClick={() => {
+            onCurrentLocationClick?.();
+            setViewMode("current");
+            applyTransform(getFocusedTransform(focusLocation, mapSize));
+          }}
           type="button"
         >
           현재 장소

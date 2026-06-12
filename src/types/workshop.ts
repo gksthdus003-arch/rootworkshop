@@ -1,6 +1,7 @@
 export type WorkshopGuideId = string;
 
 export type BottomTabId = "map" | "schedule" | "events" | "recommendations";
+export type WorkshopStatus = "pre" | "live" | "closed";
 
 export type ScheduleCategory =
   | "orientation"
@@ -8,10 +9,19 @@ export type ScheduleCategory =
   | "break"
   | "meal"
   | "activity"
+  | "event"
+  | "free"
   | "notice";
 
 export type EventStatus = "active" | "waiting" | "closed";
 export type SurveyQuestionType = "description" | "singleChoice" | "multipleChoice" | "shortText";
+export type MapLocationCategory =
+  | "meal"
+  | "lodging"
+  | "program"
+  | "activity"
+  | "gathering"
+  | "other";
 
 export interface ParticipantProfile {
   name: string;
@@ -22,6 +32,7 @@ export interface ScheduleItem {
   id: string;
   title: string;
   description: string;
+  displayTime?: string;
   startAt: string;
   endAt: string;
   location: string;
@@ -37,6 +48,7 @@ export interface ScheduleControlConfig {
 export interface MapLocation {
   id: string;
   name: string;
+  category: MapLocationCategory;
   xPercent: number;
   yPercent: number;
   isWorkshopLocation: boolean;
@@ -114,6 +126,15 @@ export interface EventSurveyResponse {
   answers: Record<string, string | string[]>;
 }
 
+export interface PosterConfig {
+  enabled: boolean;
+  imageUrl: string;
+  version: string;
+  durationMs: number;
+  showOnPreFirstVisit: boolean;
+  showOnDay1FirstVisit: boolean;
+}
+
 export interface WorkshopGuide {
   id: WorkshopGuideId;
   round: number;
@@ -121,7 +142,14 @@ export interface WorkshopGuide {
   title: string;
   subtitle: string;
   periodLabel: string;
+  startDate: string;
+  status: WorkshopStatus;
   locationLabel: string;
+  preparationItems: string[];
+  venueAddress: string;
+  transportationGuide: string;
+  mapLinkUrl?: string;
+  poster: PosterConfig;
   isDefault: boolean;
   isPublished: boolean;
   scheduleControl: ScheduleControlConfig;

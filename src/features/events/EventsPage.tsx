@@ -50,10 +50,10 @@ interface SurveyQuestionViewProps {
 const SurveyQuestionView = ({ answer, question, onChange }: SurveyQuestionViewProps) => {
   if (question.type === "description") {
     return (
-      <div className="rounded-lg border border-brand-100 bg-brand-50 p-4">
+      <div className="rounded-lg border border-brand-100 bg-brand-50 p-3">
         <p className="text-base font-bold text-brand-950">{question.label}</p>
         {question.description ? (
-          <p className="mt-2 text-sm leading-6 text-brand-900/80">{question.description}</p>
+          <p className="mt-2 text-sm leading-5 text-brand-900/80">{question.description}</p>
         ) : null}
       </div>
     );
@@ -61,19 +61,19 @@ const SurveyQuestionView = ({ answer, question, onChange }: SurveyQuestionViewPr
 
   if (question.type === "singleChoice") {
     return (
-      <fieldset className="space-y-3">
-        <legend className="text-lg font-bold text-gray-950">
+      <fieldset className="space-y-2">
+        <legend className="text-base font-bold text-gray-950">
           {question.label}
           {question.required ? <span className="ml-1 text-brand-700">*</span> : null}
         </legend>
         {question.description ? (
-          <p className="text-sm leading-6 text-gray-600">{question.description}</p>
+          <p className="text-sm leading-5 text-gray-600">{question.description}</p>
         ) : null}
         <div className="grid gap-2">
           {question.options?.map((option) => (
             <label
               className={cn(
-                "flex min-h-12 items-center gap-3 rounded-lg border px-3 text-sm font-semibold transition",
+                "flex min-h-10 items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold leading-5 transition",
                 answer === option
                   ? "border-brand-600 bg-brand-50 text-brand-900"
                   : "border-gray-200 bg-white text-gray-700",
@@ -99,13 +99,13 @@ const SurveyQuestionView = ({ answer, question, onChange }: SurveyQuestionViewPr
     const selectedAnswers = Array.isArray(answer) ? answer : [];
 
     return (
-      <fieldset className="space-y-3">
-        <legend className="text-lg font-bold text-gray-950">
+      <fieldset className="space-y-2">
+        <legend className="text-base font-bold text-gray-950">
           {question.label}
           {question.required ? <span className="ml-1 text-brand-700">*</span> : null}
         </legend>
         {question.description ? (
-          <p className="text-sm leading-6 text-gray-600">{question.description}</p>
+          <p className="text-sm leading-5 text-gray-600">{question.description}</p>
         ) : null}
         <div className="grid gap-2">
           {question.options?.map((option) => {
@@ -114,7 +114,7 @@ const SurveyQuestionView = ({ answer, question, onChange }: SurveyQuestionViewPr
             return (
               <label
                 className={cn(
-                  "flex min-h-12 items-center gap-3 rounded-lg border px-3 text-sm font-semibold transition",
+                  "flex min-h-10 items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold leading-5 transition",
                   isSelected
                     ? "border-brand-600 bg-brand-50 text-brand-900"
                     : "border-gray-200 bg-white text-gray-700",
@@ -144,15 +144,15 @@ const SurveyQuestionView = ({ answer, question, onChange }: SurveyQuestionViewPr
 
   return (
     <label className="block">
-      <span className="text-lg font-bold text-gray-950">
+      <span className="text-base font-bold text-gray-950">
         {question.label}
         {question.required ? <span className="ml-1 text-brand-700">*</span> : null}
       </span>
       {question.description ? (
-        <p className="mt-2 text-sm leading-6 text-gray-600">{question.description}</p>
+        <p className="mt-2 text-sm leading-5 text-gray-600">{question.description}</p>
       ) : null}
       <textarea
-        className="mt-4 min-h-36 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-3 text-base outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+        className="mt-3 h-28 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-3 text-base outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
         onChange={(inputEvent) => onChange(inputEvent.target.value)}
         placeholder="답변을 입력해 주세요"
         value={(answer as string | undefined) ?? ""}
@@ -238,23 +238,23 @@ const SurveyFlowPage = ({
   };
 
   return (
-    <section className="min-h-full space-y-4 bg-gray-50 pb-4">
-      <div className="sticky top-0 z-10 border-b border-gray-200 bg-white px-4 py-3">
+    <section className="-mx-4 -mb-3 -mt-3 bg-gray-50">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-2">
         <button
-          className="inline-flex min-h-9 items-center gap-2 text-sm font-bold text-gray-700"
+          className="inline-flex min-h-8 items-center gap-2 text-sm font-bold text-gray-700"
           onClick={onBack}
           type="button"
         >
           <ArrowLeft className="h-4 w-4" />
           이전
         </button>
-        <div className="mt-2">
+        <div className="mt-1">
           <p className="text-xs font-bold text-brand-700">설문 진행</p>
-          <h1 className="mt-1 text-xl font-bold text-gray-950">{event.title}</h1>
-          <p className="mt-1 text-sm text-gray-600">{event.description}</p>
+          <h1 className="mt-0.5 line-clamp-1 text-lg font-bold text-gray-950">{event.title}</h1>
+          <p className="mt-0.5 line-clamp-1 text-xs text-gray-600">{event.description}</p>
         </div>
-        <div className="mt-3 flex items-center gap-3">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+        <div className="mt-2 flex items-center gap-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
             <div
               className="h-full rounded-full bg-brand-700 transition-all"
               style={{ width: `${((stepIndex + 1) / totalStepCount) * 100}%` }}
@@ -266,8 +266,8 @@ const SurveyFlowPage = ({
         </div>
       </div>
 
-      <div className="px-4">
-        <Card className="min-h-[20rem]">
+      <div className="px-4 py-3">
+        <Card className="p-3">
           {question ? (
             <SurveyQuestionView
               answer={answers[question.id]}
@@ -275,24 +275,25 @@ const SurveyFlowPage = ({
               question={question}
             />
           ) : (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
               <p className="text-base font-bold text-gray-950">등록된 문항이 없습니다.</p>
-              <p className="mt-2 text-sm leading-6 text-gray-600">
+              <p className="mt-2 text-sm leading-5 text-gray-600">
                 제출 버튼을 누르면 빈 응답으로 저장됩니다.
               </p>
             </div>
           )}
 
           {errorMessage ? (
-            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+            <p className="mt-3 shrink-0 rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
               {errorMessage}
             </p>
           ) : null}
         </Card>
       </div>
 
-      <div className="sticky bottom-0 z-10 grid grid-cols-2 gap-2 border-t border-gray-200 bg-white px-4 py-3">
+      <div className="grid grid-cols-2 gap-2 border-t border-gray-200 bg-white px-4 py-3 safe-bottom">
         <Button
+          className="min-h-9 py-1.5"
           disabled={stepIndex === 0}
           onClick={() => {
             setErrorMessage("");
@@ -302,7 +303,7 @@ const SurveyFlowPage = ({
         >
           이전
         </Button>
-        <Button onClick={isLastStep ? handleSubmit : handleNext}>
+        <Button className="min-h-9 py-1.5" onClick={isLastStep ? handleSubmit : handleNext}>
           {isLastStep ? "제출" : "다음"}
         </Button>
       </div>
@@ -323,78 +324,82 @@ const EventResultPage = ({ event, participantName, response, onBack }: EventResu
     event.teams.find((team) => (participantName ? team.members.includes(participantName) : false));
 
   return (
-    <section className="space-y-4">
-      <button
-        className="inline-flex min-h-9 items-center gap-2 text-sm font-bold text-gray-700"
-        onClick={onBack}
-        type="button"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        이전
-      </button>
+    <section className="-mx-4 -mb-3 -mt-3 bg-gray-50">
+      <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-2">
+        <button
+          className="inline-flex min-h-8 items-center gap-2 text-sm font-bold text-gray-700"
+          onClick={onBack}
+          type="button"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          이전
+        </button>
 
-      <div>
-        <p className="text-xs font-bold text-brand-700">이벤트 결과</p>
-        <h1 className="mt-1 text-2xl font-bold text-gray-950">{event.title}</h1>
-        <p className="mt-1 text-sm leading-6 text-gray-600">{event.description}</p>
+        <div className="mt-1">
+          <p className="text-xs font-bold text-brand-700">이벤트 결과</p>
+          <h1 className="mt-0.5 line-clamp-1 text-lg font-bold text-gray-950">{event.title}</h1>
+          <p className="mt-0.5 line-clamp-1 text-xs text-gray-600">{event.description}</p>
+        </div>
       </div>
 
-      {!event.requiresTeamAssignment ? (
-        <Card>
-          <p className="text-lg font-bold text-gray-950">
-            {response ? "참여 완료" : "이벤트가 완료되었습니다."}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-gray-600">
-            이 이벤트는 조 배정이 필요 없는 설문입니다.
-          </p>
-        </Card>
-      ) : (
-        <>
-          <Card>
-            <p className="flex items-center gap-2 text-base font-bold text-gray-950">
-              <Users className="h-4 w-4 text-brand-700" />
-              내 조 배정
+      <div className="px-4 py-3">
+        {!event.requiresTeamAssignment ? (
+          <Card className="p-3">
+            <p className="text-base font-bold text-gray-950">
+              {response ? "참여 완료" : "이벤트가 완료되었습니다."}
             </p>
-            {assignedTeam ? (
-              <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50 p-3">
-                <p className="text-lg font-bold text-brand-950">{assignedTeam.name}</p>
-                <p className="mt-1 text-sm leading-6 text-brand-900/80">
-                  {assignedTeam.members.join(", ")}
-                </p>
-                {assignedTeam.memo ? (
-                  <p className="mt-2 text-xs font-bold text-brand-700">{assignedTeam.memo}</p>
-                ) : null}
-              </div>
-            ) : (
-              <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm font-semibold text-gray-600">
-                아직 조 배정이 완료되지 않았습니다.
+            <p className="mt-2 text-sm leading-5 text-gray-600">
+              이 이벤트는 조 배정이 필요 없는 설문입니다.
+            </p>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            <Card className="p-3">
+              <p className="flex items-center gap-2 text-base font-bold text-gray-950">
+                <Users className="h-4 w-4 text-brand-700" />
+                내 조 배정
               </p>
-            )}
-          </Card>
+              {assignedTeam ? (
+                <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50 p-3">
+                  <p className="text-base font-bold text-brand-950">{assignedTeam.name}</p>
+                  <p className="mt-1 text-sm leading-5 text-brand-900/80">
+                    {assignedTeam.members.join(", ")}
+                  </p>
+                  {assignedTeam.memo ? (
+                    <p className="mt-2 text-xs font-bold text-brand-700">{assignedTeam.memo}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm font-semibold text-gray-600">
+                  아직 조 배정이 완료되지 않았습니다.
+                </p>
+              )}
+            </Card>
 
-          <Card>
-            <p className="text-base font-bold text-gray-950">내 설문 제출 내용</p>
-            {response && Object.keys(response.answers).length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {Object.entries(response.answers).map(([questionId, answer]) => {
-                  const question = event.survey.find((item) => item.id === questionId);
+            <Card className="p-3">
+              <p className="text-base font-bold text-gray-950">내 설문 제출 내용</p>
+              {response && Object.keys(response.answers).length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  {Object.entries(response.answers).map(([questionId, answer]) => {
+                    const question = event.survey.find((item) => item.id === questionId);
 
-                  return (
-                    <p className="text-sm leading-6 text-gray-600" key={questionId}>
-                      <span className="font-semibold text-gray-950">
-                        {question?.label ?? questionId}:
-                      </span>{" "}
-                      {formatAnswerValue(answer)}
-                    </p>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-gray-500">제출한 설문 응답이 없습니다.</p>
-            )}
-          </Card>
-        </>
-      )}
+                    return (
+                      <p className="text-sm leading-5 text-gray-600" key={questionId}>
+                        <span className="font-semibold text-gray-950">
+                          {question?.label ?? questionId}:
+                        </span>{" "}
+                        {formatAnswerValue(answer)}
+                      </p>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-gray-500">제출한 설문 응답이 없습니다.</p>
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
     </section>
   );
 };

@@ -20,7 +20,7 @@ export const storageKeys = {
   selectedGuideId: "workshop-guide:selected-guide-id",
   adminUnlocked: "workshop-guide:admin-unlocked",
   adminPassword: "workshop-guide:admin-password",
-  guideOverrides: "workshop-guide:guide-overrides-v2",
+  guideOverrides: "workshop-guide:guide-overrides-v3",
   participants: "workshop-guide:participants",
   eventResponses: "workshop-guide:event-responses",
   eventOverrides: "workshop-guide:event-overrides",
