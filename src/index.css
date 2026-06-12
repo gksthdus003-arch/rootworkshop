@@ -53,6 +53,10 @@
     animation: poster-splash var(--poster-splash-duration, 2000ms) ease forwards;
   }
 
+  .pre-guide-banner-nudge {
+    animation: pre-guide-banner-nudge 1400ms ease;
+  }
+
   .pre-guide-kakao-map.root_daum_roughmap,
   .pre-guide-kakao-map .root_daum_roughmap,
   .pre-guide-kakao-map .wrap_map,
@@ -89,5 +93,29 @@
   100% {
     opacity: 0;
     transform: scale(0.95);
+  }
+}
+
+@keyframes pre-guide-banner-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+    box-shadow: 0 12px 30px rgba(17, 24, 39, 0.16);
+  }
+
+  12%,
+  36%,
+  60% {
+    transform: translateX(-4px);
+  }
+
+  24%,
+  48%,
+  72% {
+    transform: translateX(4px);
+  }
+
+  40% {
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.22), 0 16px 34px rgba(17, 24, 39, 0.2);
   }
 }

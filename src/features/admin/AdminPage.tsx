@@ -543,9 +543,13 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   if (!isAdminUnlocked) {
     return (
       <section className="mx-auto max-w-sm space-y-4 overflow-x-hidden">
-        <Button icon={<ArrowLeft className="h-4 w-4" />} onClick={onBack} variant="ghost">
-          홈으로 돌아가기
-        </Button>
+        <Button
+          aria-label="홈으로 돌아가기"
+          className="h-10 w-10 rounded-full p-0"
+          icon={<ArrowLeft className="h-7 w-7" />}
+          onClick={onBack}
+          variant="ghost"
+        />
         <form className={panelClass} onSubmit={handleLogin}>
           <div className="w-fit rounded-full bg-brand-50 p-3 text-brand-700">
             <Lock className="h-6 w-6" />
@@ -572,11 +576,19 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
   return (
     <section className="min-w-0 max-w-full space-y-4 overflow-x-hidden pb-6">
-      <div className="relative flex min-h-12 flex-col items-stretch gap-2 border-b border-gray-200 bg-white pb-3 sm:flex-row sm:items-center sm:justify-between sm:pb-0">
-        <label className="relative min-w-0 flex-1">
+      <div className="grid min-h-12 grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-2 border-b border-gray-200 bg-white pb-3">
+        <Button
+          aria-label="홈으로 돌아가기"
+          className="h-10 w-10 rounded-full p-0"
+          icon={<ArrowLeft className="h-7 w-7" />}
+          onClick={onBack}
+          variant="ghost"
+        />
+
+        <label className="relative min-w-0">
           <select
             aria-label="워크숍 회차 선택"
-            className="w-full appearance-none truncate bg-transparent py-2 pr-7 text-lg font-bold text-gray-950 outline-none"
+            className="w-full appearance-none truncate bg-transparent py-2 pr-7 text-base font-bold text-gray-950 outline-none sm:text-lg"
             onChange={(event) => selectGuide(event.target.value)}
             value={selectedGuide.id}
           >
@@ -591,17 +603,13 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
           </span>
         </label>
 
-        <Button className="shrink-0 px-3" icon={<ArrowLeft className="h-4 w-4" />} onClick={onBack} variant="ghost">
-          홈으로 돌아가기
-        </Button>
-
         <details className="relative shrink-0">
           <summary className="flex min-h-10 cursor-pointer list-none items-center rounded-lg px-3 text-sm font-bold text-gray-700 hover:bg-gray-100">
             ⚙ 관리
           </summary>
           <div className="absolute right-0 top-12 z-40 max-h-[calc(100dvh-8rem)] w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white p-4 shadow-2xl">
             <div className="flex flex-wrap justify-end gap-2">
-              <Button icon={<ArrowLeft className="h-4 w-4" />} onClick={onBack} variant="ghost">
+              <Button icon={<ArrowLeft className="h-6 w-6" />} onClick={onBack} variant="ghost">
                 홈으로 돌아가기
               </Button>
               <Button icon={<LogOut className="h-4 w-4" />} onClick={lockAdmin} variant="secondary">
@@ -926,28 +934,24 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       </div>
 
       <nav className="overflow-x-hidden border-b border-gray-200 bg-white">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
-          {adminSections.map((section, sectionIndex) => {
+        <div className="grid grid-cols-4 gap-1 px-1">
+          {adminSections.map((section) => {
             const isActive = activeSection === section.id;
 
             return (
-              <div className="flex items-center gap-4" key={section.id}>
-                <button
-                  className={cn(
-                    "min-h-12 whitespace-nowrap border-b-2 px-1 text-sm transition",
-                    isActive
-                      ? "border-brand-700 font-bold text-gray-950"
-                      : "border-transparent font-semibold text-gray-500 hover:text-gray-900",
-                  )}
-                  onClick={() => setActiveSection(section.id)}
-                  type="button"
-                >
-                  {section.label}
-                </button>
-                {sectionIndex < adminSections.length - 1 ? (
-                  <span className="text-sm font-semibold text-gray-300">|</span>
-                ) : null}
-              </div>
+              <button
+                className={cn(
+                  "min-h-11 min-w-0 rounded-t-lg border-b-2 px-1 text-sm transition",
+                  isActive
+                    ? "border-brand-700 bg-brand-50 font-bold text-gray-950"
+                    : "border-transparent font-semibold text-gray-500 hover:bg-gray-50 hover:text-gray-900",
+                )}
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                type="button"
+              >
+                <span className="block truncate">{section.label}</span>
+              </button>
             );
           })}
         </div>

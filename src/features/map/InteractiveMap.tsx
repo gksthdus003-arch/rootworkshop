@@ -108,6 +108,7 @@ export const InteractiveMap = ({
   const [showSmokingAreas, setShowSmokingAreas] = useState(true);
   const [selectedLocationId, setSelectedLocationId] = useState<string>();
   const [noticeMessage, setNoticeMessage] = useState("");
+  const [preGuideNudgeId, setPreGuideNudgeId] = useState(0);
   const [isControlMenuOpen, setIsControlMenuOpen] = useState(false);
   const [transform, setTransform] = useState<TransformState>(INITIAL_TRANSFORM);
   const [currentImageUrl, setCurrentImageUrl] = useState(imageUrl ?? fallbackImageUrl);
@@ -186,6 +187,8 @@ export const InteractiveMap = ({
   );
   const canMoveToScheduleLocation = guideStatus === "live" && Boolean(schedule);
   const shouldShowPreGuideBanner = guideStatus === "pre" && Boolean(onPreGuideClick);
+  const shouldShowCurrentLocationButton =
+    canMoveToScheduleLocation || shouldShowPreGuideBanner;
 
   useLayoutEffect(() => {
     if (!viewportRef.current) {
@@ -322,6 +325,12 @@ export const InteractiveMap = ({
   };
 
   const handleMoveToCurrentLocation = () => {
+    if (guideStatus === "pre") {
+      setNoticeMessage("");
+      setPreGuideNudgeId((currentId) => currentId + 1);
+      return;
+    }
+
     const target = findScheduleLocationTarget();
 
     setNoticeMessage(target.message);
@@ -687,7 +696,7 @@ export const InteractiveMap = ({
 
         {isControlMenuOpen ? (
           <div className="grid w-28 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
-            {canMoveToScheduleLocation ? (
+            {shouldShowCurrentLocationButton ? (
               <button
                 className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-brand-700 px-1 text-white hover:bg-brand-800"
                 onClick={handleMoveToCurrentLocation}
@@ -721,10 +730,14 @@ export const InteractiveMap = ({
         </div>
       ) : shouldShowPreGuideBanner && onPreGuideClick ? (
         <div
-          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur"
+          className={cn(
+            "absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur",
+            preGuideNudgeId > 0 ? "pre-guide-banner-nudge" : "",
+          )}
+          key={preGuideNudgeId}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <span>워크숍 시작 전입니다. 사전안내를 확인해주세요.</span>
+          <span>워크숍 시작 전입니다. 사전안내를 먼저 확인해주세요.</span>
           <button
             className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
             onClick={onPreGuideClick}
