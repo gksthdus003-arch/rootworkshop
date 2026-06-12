@@ -371,7 +371,7 @@ const EventResultPage = ({ event, participantName, response, onBack }: EventResu
                 </div>
               ) : (
                 <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm font-semibold text-gray-600">
-                  아직 조 배정이 완료되지 않았습니다.
+                  조 배정 대기 중입니다.
                 </p>
               )}
             </Card>
@@ -404,8 +404,33 @@ const EventResultPage = ({ event, participantName, response, onBack }: EventResu
   );
 };
 
-const getClosedButtonLabel = (event: EventItem) =>
-  event.requiresTeamAssignment ? "결과 확인" : "완료";
+const getAssignedTeam = (
+  event: EventItem,
+  participantName?: string,
+  response?: EventSurveyResponse,
+) =>
+  event.teams.find((team) => team.id === response?.assignedTeamId) ??
+  event.teams.find((team) => (participantName ? team.members.includes(participantName) : false));
+
+const getEventButtonLabel = (
+  event: EventItem,
+  hasSubmitted: boolean,
+  hasAssignedTeam: boolean,
+) => {
+  if (event.status === "waiting") {
+    return "대기 중";
+  }
+
+  if (event.status === "active") {
+    return hasSubmitted ? "응답 수정" : "참여하기";
+  }
+
+  if (event.requiresTeamAssignment) {
+    return hasAssignedTeam ? "조 배치 확인" : "조 배정 대기 중";
+  }
+
+  return hasSubmitted ? "제출 내용 확인" : "완료";
+};
 
 export const EventsPage = () => {
   const { eventResponses, participantProfile, saveEventResponse, selectedGuide } =
@@ -484,13 +509,13 @@ export const EventsPage = () => {
       <div className="space-y-3">
         {selectedGuide.events.length > 0 ? (
           selectedGuide.events.map((event) => {
-            const hasSubmitted = responseByEventId.has(event.id);
-            const buttonLabel =
-              event.status === "waiting"
-                ? "대기 중"
-                : event.status === "active"
-                  ? "참여하기"
-                  : getClosedButtonLabel(event);
+            const response = responseByEventId.get(event.id);
+            const hasSubmitted = Boolean(response);
+            const assignedTeam = getAssignedTeam(event, participantName, response);
+            const hasAssignedTeam = Boolean(assignedTeam);
+            const isWaitingForTeam =
+              event.status === "closed" && event.requiresTeamAssignment && !hasAssignedTeam;
+            const buttonLabel = getEventButtonLabel(event, hasSubmitted, hasAssignedTeam);
 
             return (
               <Card key={event.id}>
@@ -510,9 +535,13 @@ export const EventsPage = () => {
                       </span>
                       {event.requiresTeamAssignment ? (
                         <span className="rounded-full bg-brand-50 px-2 py-1 text-[11px] font-bold text-brand-700">
-                          조 배정
+                          조 배치 사용
                         </span>
-                      ) : null}
+                      ) : (
+                        <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
+                          설문형
+                        </span>
+                      )}
                     </div>
                     <h2 className="mt-2 text-base font-bold text-gray-950">{event.title}</h2>
                     <p className="mt-1 text-sm leading-5 text-gray-600">{event.description}</p>
@@ -521,6 +550,11 @@ export const EventsPage = () => {
                       <p className="mt-2 flex items-center gap-1 text-xs font-bold text-brand-700">
                         <CheckCircle2 className="h-4 w-4" />
                         응답 제출 완료
+                      </p>
+                    ) : null}
+                    {isWaitingForTeam ? (
+                      <p className="mt-2 text-xs font-bold text-yellow-800">
+                        조 배정 대기 중
                       </p>
                     ) : null}
                   </div>

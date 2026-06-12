@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, ReactNode, useState } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -23,6 +23,7 @@ import {
 import { useWorkshopStore } from "../../store/workshopStore";
 import type {
   EventItem,
+  EventSurveyResponse,
   EventStatus,
   MapLocationCategory,
   MapLocation,
@@ -46,6 +47,12 @@ type AdminSectionId =
   | "recommendations";
 
 type EventTemplateId = "activity" | "bowling";
+type ResponseManageTab = "summary" | "responses" | "teams";
+
+const eventTemplateRequiresTeamAssignment: Record<EventTemplateId, boolean> = {
+  activity: false,
+  bowling: true,
+};
 
 const adminSections: Array<{
   id: AdminSectionId;
@@ -93,6 +100,85 @@ const compactFieldClass =
   "w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100";
 const labelClass = "text-sm font-semibold text-gray-700";
 const panelClass = "rounded-lg border border-gray-200 bg-white p-4 shadow-soft";
+const adminCardClass = "rounded-lg border border-gray-200 bg-white p-4 shadow-soft";
+
+interface AdminModalProps {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  onClose: () => void;
+}
+
+const AdminModal = ({ title, description, children, onClose }: AdminModalProps) => (
+  <div
+    className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/45 px-3 py-4 sm:items-center"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-bold text-gray-950">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-sm leading-5 text-gray-500">{description}</p>
+          ) : null}
+        </div>
+        <button
+          aria-label="닫기"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-gray-600 hover:bg-gray-100"
+          onClick={onClose}
+          type="button"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="min-h-0 overflow-y-auto px-4 py-4">{children}</div>
+    </div>
+  </div>
+);
+
+type LocationEditDraft = {
+  id: string;
+  name: string;
+  description: string;
+  category: MapLocationCategory;
+  xPercent: string;
+  yPercent: string;
+  isWorkshopLocation: boolean;
+  isSmokingArea: boolean;
+};
+
+type ScheduleEditDraft = {
+  id: string;
+  title: string;
+  description: string;
+  startAt: string;
+  endAt: string;
+  location: string;
+  locationId: string;
+  category: ScheduleCategory;
+};
+
+type RecommendationEditDraft = {
+  id: string;
+  title: string;
+  locationLabel: string;
+  description: string;
+  category: string;
+  imageUrl: string;
+  isVisible: boolean;
+};
+
+type EventEditDraft = {
+  id: string;
+  title: string;
+  status: EventStatus;
+  description: string;
+  opensAt: string;
+  closesAt: string;
+  requiresTeamAssignment: boolean;
+  resultSummary: string;
+};
 
 const createId = (prefix: string) => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -147,6 +233,60 @@ const getNextPosterVersion = (version: string) => {
 
 const formatAnswerValue = (value: string | string[]) =>
   Array.isArray(value) ? value.join(", ") : value;
+
+const getEventResponseTeam = (event: EventItem, response: EventSurveyResponse) =>
+  event.teams.find((team) => team.id === response.assignedTeamId) ??
+  event.teams.find((team) => team.members.includes(response.participantName));
+
+const getTeamAssignmentLabel = (event: EventItem, response: EventSurveyResponse) => {
+  if (!event.requiresTeamAssignment) {
+    return "조 배치 미사용";
+  }
+
+  return getEventResponseTeam(event, response)?.name ?? "미배정";
+};
+
+const getChoiceResponseSummary = (
+  question: SurveyQuestion,
+  responses: EventSurveyResponse[],
+) => {
+  const selectedByOption = new Map<string, string[]>();
+
+  question.options?.forEach((option) => {
+    selectedByOption.set(option, []);
+  });
+
+  responses.forEach((response) => {
+    const answer = response.answers[question.id];
+    const selectedOptions = Array.isArray(answer) ? answer : answer ? [answer] : [];
+
+    selectedOptions.forEach((option) => {
+      const currentNames = selectedByOption.get(option) ?? [];
+      selectedByOption.set(option, [...currentNames, response.participantName]);
+    });
+  });
+
+  return Array.from(selectedByOption.entries()).map(([option, participantNames]) => ({
+    option,
+    participantNames,
+  }));
+};
+
+const getShortTextResponseSummary = (
+  question: SurveyQuestion,
+  responses: EventSurveyResponse[],
+) =>
+  responses
+    .map((response) => {
+      const answer = response.answers[question.id];
+      const answerText = Array.isArray(answer) ? answer.join(", ") : answer;
+
+      return {
+        participantName: response.participantName,
+        answerText: answerText?.trim() ?? "",
+      };
+    })
+    .filter((item) => item.answerText.length > 0);
 
 const createEventFromTemplate = (
   templateId: EventTemplateId,
@@ -338,7 +478,8 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     isWorkshopLocation: true,
     isSmokingArea: false,
   });
-  const [editingLocationId, setEditingLocationId] = useState<string>();
+  const [isLocationAddModalOpen, setIsLocationAddModalOpen] = useState(false);
+  const [locationEditDraft, setLocationEditDraft] = useState<LocationEditDraft | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState({
     title: "",
     description: "",
@@ -348,10 +489,20 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     locationId: "",
     category: "session" as ScheduleCategory,
   });
+  const [isScheduleAddModalOpen, setIsScheduleAddModalOpen] = useState(false);
+  const [scheduleEditDraft, setScheduleEditDraft] = useState<ScheduleEditDraft | null>(null);
   const [eventTitle, setEventTitle] = useState("");
   const [eventTemplateId, setEventTemplateId] = useState<EventTemplateId>("activity");
+  const [eventRequiresTeamAssignment, setEventRequiresTeamAssignment] = useState(
+    eventTemplateRequiresTeamAssignment.activity,
+  );
   const [eventStatus, setEventStatus] = useState<EventStatus>("waiting");
-  const [selectedEventId, setSelectedEventId] = useState<string>();
+  const [isEventAddModalOpen, setIsEventAddModalOpen] = useState(false);
+  const [eventEditDraft, setEventEditDraft] = useState<EventEditDraft | null>(null);
+  const [surveyManageEventId, setSurveyManageEventId] = useState<string>();
+  const [responseManageEventId, setResponseManageEventId] = useState<string>();
+  const [responseManageTab, setResponseManageTab] = useState<ResponseManageTab>("summary");
+  const [responseSummaryOpenKey, setResponseSummaryOpenKey] = useState<string>();
   const [recommendationDraft, setRecommendationDraft] = useState({
     title: "",
     locationLabel: "",
@@ -360,6 +511,9 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     imageUrl: "/assets/recommendation-eco-stream.png",
     isVisible: true,
   });
+  const [isRecommendationAddModalOpen, setIsRecommendationAddModalOpen] = useState(false);
+  const [recommendationEditDraft, setRecommendationEditDraft] =
+    useState<RecommendationEditDraft | null>(null);
   const [groupDrafts, setGroupDrafts] = useState<
     Record<string, { teamName: string; membersText: string; memo: string }>
   >({});
@@ -370,12 +524,20 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   const selectedGuideResponses = eventResponses.filter(
     (response) => response.guideId === selectedGuide.id,
   );
-  const selectedAdminEvent =
-    selectedGuide.events.find((eventItem) => eventItem.id === selectedEventId) ??
-    selectedGuide.events[0];
-  const selectedEventResponses = selectedAdminEvent
-    ? selectedGuideResponses.filter((response) => response.eventId === selectedAdminEvent.id)
+  const surveyManageEvent = surveyManageEventId
+    ? selectedGuide.events.find((eventItem) => eventItem.id === surveyManageEventId)
+    : undefined;
+  const responseManageEvent = responseManageEventId
+    ? selectedGuide.events.find((eventItem) => eventItem.id === responseManageEventId)
+    : undefined;
+  const responseManageEventResponses = responseManageEvent
+    ? selectedGuideResponses.filter((response) => response.eventId === responseManageEvent.id)
     : [];
+  const closeResponseManageModal = () => {
+    setResponseManageEventId(undefined);
+    setResponseManageTab("summary");
+    setResponseSummaryOpenKey(undefined);
+  };
   const updatePoster = (updates: Partial<WorkshopGuide["poster"]>) => {
     updateGuide(selectedGuide.id, {
       poster: {
@@ -407,6 +569,23 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     });
   };
 
+  const resetLocationDraft = () => {
+    setLocationDraft({
+      name: "",
+      description: "",
+      category: "other",
+      xPercent: "50",
+      yPercent: "50",
+      isWorkshopLocation: true,
+      isSmokingArea: false,
+    });
+  };
+
+  const openLocationAddModal = () => {
+    resetLocationDraft();
+    setIsLocationAddModalOpen(true);
+  };
+
   const handleAddMapLocation = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -424,19 +603,44 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       isWorkshopLocation: locationDraft.isWorkshopLocation,
       isSmokingArea: locationDraft.isSmokingArea,
     });
-    setLocationDraft({
-      name: "",
-      description: "",
-      category: "other",
-      xPercent: "50",
-      yPercent: "50",
-      isWorkshopLocation: true,
-      isSmokingArea: false,
-    });
+    resetLocationDraft();
+    setIsLocationAddModalOpen(false);
   };
 
   const getLocationScheduleUsage = (locationId: string) =>
     selectedGuide.schedule.filter((scheduleItem) => scheduleItem.locationId === locationId);
+
+  const openLocationEditModal = (location: MapLocation) => {
+    setLocationEditDraft({
+      id: location.id,
+      name: location.name,
+      description: location.description ?? "",
+      category: location.category,
+      xPercent: String(location.xPercent),
+      yPercent: String(location.yPercent),
+      isWorkshopLocation: location.isWorkshopLocation,
+      isSmokingArea: location.isSmokingArea,
+    });
+  };
+
+  const handleSaveLocationEdit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!locationEditDraft) {
+      return;
+    }
+
+    updateMapLocation(selectedGuide.id, locationEditDraft.id, {
+      name: locationEditDraft.name,
+      description: locationEditDraft.description,
+      category: locationEditDraft.category,
+      xPercent: Number(locationEditDraft.xPercent) || 50,
+      yPercent: Number(locationEditDraft.yPercent) || 50,
+      isWorkshopLocation: locationEditDraft.isWorkshopLocation,
+      isSmokingArea: locationEditDraft.isSmokingArea,
+    });
+    setLocationEditDraft(null);
+  };
 
   const handleDeleteMapLocation = (location: MapLocation) => {
     const usedScheduleItems = getLocationScheduleUsage(location.id);
@@ -455,7 +659,39 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     }
 
     deleteMapLocation(selectedGuide.id, location.id);
-    setEditingLocationId((currentId) => (currentId === location.id ? undefined : currentId));
+    setLocationEditDraft((currentDraft) =>
+      currentDraft?.id === location.id ? null : currentDraft,
+    );
+  };
+
+  const resetScheduleDraft = () => {
+    setScheduleDraft({
+      title: "",
+      description: "",
+      startAt: "",
+      endAt: "",
+      location: "",
+      locationId: "",
+      category: "session",
+    });
+  };
+
+  const openScheduleAddModal = () => {
+    setScheduleDraft({
+      title: "",
+      description: "",
+      startAt: "",
+      endAt: "",
+      location: "",
+      locationId: "",
+      category: "session",
+    });
+    setIsScheduleAddModalOpen(true);
+  };
+
+  const closeScheduleAddModal = () => {
+    resetScheduleDraft();
+    setIsScheduleAddModalOpen(false);
   };
 
   const handleAddScheduleItem = (event: FormEvent<HTMLFormElement>) => {
@@ -475,15 +711,50 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       locationId: scheduleDraft.locationId || undefined,
       category: scheduleDraft.category,
     });
-    setScheduleDraft({
-      title: "",
-      description: "",
-      startAt: "",
-      endAt: "",
-      location: "",
-      locationId: "",
-      category: "session",
+    closeScheduleAddModal();
+  };
+
+  const openScheduleEditModal = (scheduleItem: ScheduleItem) => {
+    setScheduleEditDraft({
+      id: scheduleItem.id,
+      title: scheduleItem.title,
+      description: scheduleItem.description,
+      startAt: getLocalDateTimeValue(scheduleItem.startAt),
+      endAt: getLocalDateTimeValue(scheduleItem.endAt),
+      location: scheduleItem.location,
+      locationId: scheduleItem.locationId ?? "",
+      category: scheduleItem.category,
     });
+  };
+
+  const handleSaveScheduleEdit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!scheduleEditDraft) {
+      return;
+    }
+
+    updateScheduleItem(selectedGuide.id, scheduleEditDraft.id, {
+      title: scheduleEditDraft.title,
+      description: scheduleEditDraft.description,
+      startAt: getIsoDateTimeValue(scheduleEditDraft.startAt),
+      endAt: getIsoDateTimeValue(scheduleEditDraft.endAt),
+      location: scheduleEditDraft.location.trim() || "장소 미정",
+      locationId: scheduleEditDraft.locationId || undefined,
+      category: scheduleEditDraft.category,
+    });
+    setScheduleEditDraft(null);
+  };
+
+  const handleDeleteScheduleItem = (scheduleItem: ScheduleItem) => {
+    if (!window.confirm("이 일정을 삭제하시겠습니까?")) {
+      return;
+    }
+
+    deleteScheduleItem(selectedGuide.id, scheduleItem.id);
+    setScheduleEditDraft((currentDraft) =>
+      currentDraft?.id === scheduleItem.id ? null : currentDraft,
+    );
   };
 
   const handleAddEvent = (event: FormEvent<HTMLFormElement>) => {
@@ -495,11 +766,90 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       eventStatus,
     );
 
-    addEvent(selectedGuide.id, nextEvent);
-    setSelectedEventId(nextEvent.id);
+    addEvent(selectedGuide.id, {
+      ...nextEvent,
+      requiresTeamAssignment: eventRequiresTeamAssignment,
+    });
     setEventTitle("");
     setEventTemplateId("activity");
+    setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
     setEventStatus("waiting");
+    setIsEventAddModalOpen(false);
+  };
+
+  const openEventAddModal = () => {
+    setEventTitle("");
+    setEventTemplateId("activity");
+    setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+    setEventStatus("waiting");
+    setIsEventAddModalOpen(true);
+  };
+
+  const openEventEditModal = (eventItem: EventItem) => {
+    setEventEditDraft({
+      id: eventItem.id,
+      title: eventItem.title,
+      status: eventItem.status,
+      description: eventItem.description,
+      opensAt: getLocalDateTimeValue(eventItem.opensAt),
+      closesAt: getLocalDateTimeValue(eventItem.closesAt),
+      requiresTeamAssignment: eventItem.requiresTeamAssignment,
+      resultSummary: eventItem.resultSummary ?? "",
+    });
+  };
+
+  const handleSaveEventEdit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!eventEditDraft) {
+      return;
+    }
+
+    updateEvent(selectedGuide.id, eventEditDraft.id, {
+      title: eventEditDraft.title,
+      status: eventEditDraft.status,
+      description: eventEditDraft.description,
+      opensAt: getIsoDateTimeValue(eventEditDraft.opensAt),
+      closesAt: getIsoDateTimeValue(eventEditDraft.closesAt),
+      requiresTeamAssignment: eventEditDraft.requiresTeamAssignment,
+      resultSummary: eventEditDraft.resultSummary,
+    });
+    setEventEditDraft(null);
+  };
+
+  const handleDeleteEvent = (eventItem: EventItem) => {
+    if (!window.confirm("이 이벤트를 삭제하시겠습니까?")) {
+      return;
+    }
+
+    deleteEvent(selectedGuide.id, eventItem.id);
+    setEventEditDraft((currentDraft) => (currentDraft?.id === eventItem.id ? null : currentDraft));
+    setSurveyManageEventId((currentId) => (currentId === eventItem.id ? undefined : currentId));
+    setResponseManageEventId((currentId) => {
+      if (currentId !== eventItem.id) {
+        return currentId;
+      }
+
+      setResponseManageTab("summary");
+      setResponseSummaryOpenKey(undefined);
+      return undefined;
+    });
+  };
+
+  const resetRecommendationDraft = () => {
+    setRecommendationDraft({
+      title: "",
+      locationLabel: "",
+      description: "",
+      category: "자유시간",
+      imageUrl: "/assets/recommendation-eco-stream.png",
+      isVisible: true,
+    });
+  };
+
+  const openRecommendationAddModal = () => {
+    resetRecommendationDraft();
+    setIsRecommendationAddModalOpen(true);
   };
 
   const handleAddRecommendation = (event: FormEvent<HTMLFormElement>) => {
@@ -516,14 +866,49 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       locationLabel: recommendationDraft.locationLabel.trim() || "위치 미정",
       description: recommendationDraft.description.trim(),
     });
-    setRecommendationDraft({
-      title: "",
-      locationLabel: "",
-      description: "",
-      category: "자유시간",
-      imageUrl: "/assets/recommendation-eco-stream.png",
-      isVisible: true,
+    resetRecommendationDraft();
+    setIsRecommendationAddModalOpen(false);
+  };
+
+  const openRecommendationEditModal = (recommendation: RecommendationItem) => {
+    setRecommendationEditDraft({
+      id: recommendation.id,
+      title: recommendation.title,
+      locationLabel: recommendation.locationLabel,
+      description: recommendation.description,
+      category: recommendation.category,
+      imageUrl: recommendation.imageUrl,
+      isVisible: recommendation.isVisible,
     });
+  };
+
+  const handleSaveRecommendationEdit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!recommendationEditDraft) {
+      return;
+    }
+
+    updateRecommendation(selectedGuide.id, recommendationEditDraft.id, {
+      title: recommendationEditDraft.title,
+      locationLabel: recommendationEditDraft.locationLabel.trim() || "위치 미정",
+      description: recommendationEditDraft.description,
+      category: recommendationEditDraft.category,
+      imageUrl: recommendationEditDraft.imageUrl,
+      isVisible: recommendationEditDraft.isVisible,
+    });
+    setRecommendationEditDraft(null);
+  };
+
+  const handleDeleteRecommendation = (recommendation: RecommendationItem) => {
+    if (!window.confirm("이 추천 코스를 삭제하시겠습니까?")) {
+      return;
+    }
+
+    deleteRecommendation(selectedGuide.id, recommendation.id);
+    setRecommendationEditDraft((currentDraft) =>
+      currentDraft?.id === recommendation.id ? null : currentDraft,
+    );
   };
 
   const handlePasswordChange = (event: FormEvent<HTMLFormElement>) => {
@@ -1015,94 +1400,19 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
           </div>
 
           <div className={`${panelClass} overflow-hidden p-0`}>
-            <div className="border-b border-gray-200 p-4">
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4">
               <h2 className="font-bold">장소 관리</h2>
+              <Button icon={<Plus className="h-4 w-4" />} onClick={openLocationAddModal}>
+                추가
+              </Button>
             </div>
-            <form
-              className="grid gap-3 border-b border-gray-100 bg-gray-50/70 p-4 md:grid-cols-2"
-              onSubmit={handleAddMapLocation}
-            >
-              <label>
-                <span className={labelClass}>장소명</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setLocationDraft({ ...locationDraft, name: event.target.value })
-                  }
-                  placeholder="새 장소"
-                  value={locationDraft.name}
-                />
-              </label>
-              <label>
-                <span className={labelClass}>카테고리</span>
-                <select
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setLocationDraft({
-                      ...locationDraft,
-                      category: event.target.value as MapLocationCategory,
-                    })
-                  }
-                  value={locationDraft.category}
-                >
-                  {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="md:col-span-2">
-                <span className={labelClass}>설명</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setLocationDraft({ ...locationDraft, description: event.target.value })
-                  }
-                  placeholder="운영 메모 또는 장소 설명"
-                  value={locationDraft.description}
-                />
-              </label>
-              <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-200">
-                  <input
-                    checked={locationDraft.isWorkshopLocation}
-                    onChange={(event) =>
-                      setLocationDraft({
-                        ...locationDraft,
-                        isWorkshopLocation: event.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                  워크숍 사용 장소
-                </label>
-                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-200">
-                  <input
-                    checked={locationDraft.isSmokingArea}
-                    onChange={(event) =>
-                      setLocationDraft({
-                        ...locationDraft,
-                        isSmokingArea: event.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                  흡연구역
-                </label>
-                <Button className="ml-auto" disabled={!locationDraft.name.trim()} type="submit">
-                  추가
-                </Button>
-              </div>
-            </form>
             <div className="grid gap-3 p-4 md:grid-cols-2">
               {selectedGuide.map.locations.map((location) => {
                 const CategoryIcon = getMapLocationCategoryIcon(location.category);
-                const isEditing = editingLocationId === location.id;
                 const usedScheduleItems = getLocationScheduleUsage(location.id);
 
                 return (
-                  <article className="rounded-lg border border-gray-200 bg-white p-4" key={location.id}>
+                  <article className={adminCardClass} key={location.id}>
                     <div className="flex min-w-0 items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-2">
@@ -1115,14 +1425,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                       </div>
                       <div className="flex shrink-0 gap-1">
                         <button
-                          aria-label={isEditing ? "수정 닫기" : "수정"}
+                          aria-label="수정"
                           className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
-                          onClick={() =>
-                            setEditingLocationId(isEditing ? undefined : location.id)
-                          }
+                          onClick={() => openLocationEditModal(location)}
                           type="button"
                         >
-                          {isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                          <Pencil className="h-4 w-4" />
                         </button>
                         <button
                           aria-label="삭제"
@@ -1168,116 +1476,6 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         </span>
                       ) : null}
                     </div>
-
-                    {isEditing ? (
-                      <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4">
-                        <label>
-                          <span className={labelClass}>장소명</span>
-                          <input
-                            className={fieldClass}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                name: event.target.value,
-                              })
-                            }
-                            value={location.name}
-                          />
-                        </label>
-                        <label>
-                          <span className={labelClass}>카테고리</span>
-                          <select
-                            className={fieldClass}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                category: event.target.value as MapLocationCategory,
-                              })
-                            }
-                            value={location.category}
-                          >
-                            {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label>
-                          <span className={labelClass}>설명</span>
-                          <input
-                            className={fieldClass}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                description: event.target.value,
-                              })
-                            }
-                            value={location.description ?? ""}
-                          />
-                        </label>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label>
-                            <span className={labelClass}>X 좌표</span>
-                            <input
-                              className={fieldClass}
-                              onChange={(event) =>
-                                updateMapLocation(selectedGuide.id, location.id, {
-                                  xPercent: Number(event.target.value),
-                                })
-                              }
-                              type="number"
-                              value={location.xPercent}
-                            />
-                          </label>
-                          <label>
-                            <span className={labelClass}>Y 좌표</span>
-                            <input
-                              className={fieldClass}
-                              onChange={(event) =>
-                                updateMapLocation(selectedGuide.id, location.id, {
-                                  yPercent: Number(event.target.value),
-                                })
-                              }
-                              type="number"
-                              value={location.yPercent}
-                            />
-                          </label>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
-                            <input
-                              checked={location.isWorkshopLocation}
-                              onChange={(event) =>
-                                updateMapLocation(selectedGuide.id, location.id, {
-                                  isWorkshopLocation: event.target.checked,
-                                })
-                              }
-                              type="checkbox"
-                            />
-                            워크숍 사용 장소
-                          </label>
-                          <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
-                            <input
-                              checked={location.isSmokingArea}
-                              onChange={(event) =>
-                                updateMapLocation(selectedGuide.id, location.id, {
-                                  isSmokingArea: event.target.checked,
-                                })
-                              }
-                              type="checkbox"
-                            />
-                            흡연구역
-                          </label>
-                          <Button
-                            className="ml-auto"
-                            icon={<Check className="h-4 w-4" />}
-                            onClick={() => setEditingLocationId(undefined)}
-                            type="button"
-                            variant="secondary"
-                          >
-                            완료
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
                   </article>
                 );
               })}
@@ -1336,14 +1534,434 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
             </div>
           </div>
 
-          <form className={panelClass} onSubmit={handleAddScheduleItem}>
+          <section className={panelClass}>
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-bold">일정 추가</h2>
-              <Button icon={<Plus className="h-4 w-4" />} type="submit">
+              <div className="min-w-0">
+                <h2 className="font-bold">일정 추가</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  새 일정은 모달에서 입력한 뒤 카드 목록에 추가됩니다.
+                </p>
+              </div>
+              <Button className="shrink-0" icon={<Plus className="h-4 w-4" />} onClick={openScheduleAddModal}>
                 추가
               </Button>
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
+          </section>
+
+          <div className={`${panelClass} overflow-hidden p-0`}>
+            <div className="border-b border-gray-200 p-4">
+              <h2 className="font-bold">일정 목록</h2>
+            </div>
+            <div className="grid gap-3 p-4 lg:grid-cols-2">
+              {selectedGuide.schedule.length > 0 ? (
+                selectedGuide.schedule.map((scheduleItem, index) => (
+                  <article className={adminCardClass} key={scheduleItem.id}>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">
+                            #{index + 1}
+                          </span>
+                          <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800">
+                            {scheduleCategoryLabels[scheduleItem.category]}
+                          </span>
+                        </div>
+                        <h3 className="mt-2 line-clamp-2 font-bold text-gray-950">
+                          {scheduleItem.title}
+                        </h3>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          aria-label="위로"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+                          onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "up")}
+                          type="button"
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          aria-label="아래로"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+                          onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "down")}
+                          type="button"
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 space-y-1 text-sm leading-5 text-gray-600">
+                      <p className="font-semibold text-gray-800">
+                        {getLocalDateTimeValue(scheduleItem.startAt).replace("T", " ")} -{" "}
+                        {getLocalDateTimeValue(scheduleItem.endAt).replace("T", " ")}
+                      </p>
+                      <p className="line-clamp-1 font-semibold text-gray-700">
+                        장소: {scheduleItem.location}
+                      </p>
+                      {scheduleItem.description ? (
+                        <p className="line-clamp-2 text-gray-500">{scheduleItem.description}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                      <Button
+                        className="px-3"
+                        onClick={() =>
+                          updateScheduleControl(selectedGuide.id, {
+                            mode: "manual",
+                            manualCurrentScheduleId: scheduleItem.id,
+                          })
+                        }
+                        variant="secondary"
+                      >
+                        현재 지정
+                      </Button>
+                      <Button
+                        className="px-3"
+                        icon={<Pencil className="h-4 w-4" />}
+                        onClick={() => openScheduleEditModal(scheduleItem)}
+                        variant="secondary"
+                      >
+                        수정
+                      </Button>
+                      <Button
+                        className="col-span-2 px-3 sm:col-span-1"
+                        icon={<Trash2 className="h-4 w-4" />}
+                        onClick={() => handleDeleteScheduleItem(scheduleItem)}
+                        variant="danger"
+                      >
+                        삭제
+                      </Button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+                  등록된 일정이 없습니다.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeSection === "events" ? (
+        <div className="space-y-4">
+          <section className={panelClass}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-bold">이벤트 관리</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  이벤트별 하위 관리는 카드의 버튼에서 엽니다.
+                </p>
+              </div>
+              <Button className="shrink-0" icon={<Plus className="h-4 w-4" />} onClick={openEventAddModal}>
+                추가
+              </Button>
+            </div>
+
+            <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4 md:grid-cols-2 xl:grid-cols-3">
+              {selectedGuide.events.length > 0 ? (
+                selectedGuide.events.map((eventItem) => {
+                  const responseCount = selectedGuideResponses.filter(
+                    (response) => response.eventId === eventItem.id,
+                  ).length;
+
+                  return (
+                    <article
+                      className="rounded-lg border border-gray-200 bg-white p-3"
+                      key={eventItem.id}
+                    >
+                      <div>
+                        <span
+                          className="inline-flex rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600"
+                        >
+                          {eventStatusLabels[eventItem.status]}
+                        </span>
+                        <p className="mt-2 line-clamp-2 text-sm font-bold text-gray-950">
+                          {eventItem.title}
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">
+                          {eventItem.description}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
+                            {eventItem.requiresTeamAssignment ? "조 배치 사용" : "조 배치 미사용"}
+                          </span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
+                            문항 {eventItem.survey.length}개
+                          </span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
+                            응답 {responseCount}개
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button
+                          className="min-h-9 px-2 py-1.5 text-xs"
+                          icon={<Pencil className="h-3.5 w-3.5" />}
+                          onClick={() => openEventEditModal(eventItem)}
+                          variant="secondary"
+                        >
+                          수정
+                        </Button>
+                        <Button
+                          className="min-h-9 px-2 py-1.5 text-xs"
+                          icon={<Trash2 className="h-3.5 w-3.5" />}
+                          onClick={() => handleDeleteEvent(eventItem)}
+                          variant="danger"
+                        >
+                          삭제
+                        </Button>
+                        <Button
+                          className="col-span-2 min-h-9 px-2 py-1.5 text-xs"
+                          onClick={() => setSurveyManageEventId(eventItem.id)}
+                          variant="secondary"
+                        >
+                          설문 문항 관리
+                        </Button>
+                        <Button
+                          className="col-span-2 min-h-9 px-2 py-1.5 text-xs"
+                          onClick={() => {
+                            setResponseManageEventId(eventItem.id);
+                            setResponseManageTab("summary");
+                            setResponseSummaryOpenKey(undefined);
+                          }}
+                          variant="secondary"
+                        >
+                          응답/조배치 관리
+                        </Button>
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500 md:col-span-2 xl:col-span-3">
+                  등록된 이벤트가 없습니다.
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {activeSection === "recommendations" ? (
+        <div className="space-y-4">
+          <section className={panelClass}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="font-bold">추천 코스 추가</h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  새 추천 코스는 모달에서 입력합니다.
+                </p>
+              </div>
+              <Button className="shrink-0" icon={<Plus className="h-4 w-4" />} onClick={openRecommendationAddModal}>
+                추가
+              </Button>
+            </div>
+          </section>
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            {selectedGuide.recommendations.length > 0 ? (
+              selectedGuide.recommendations.map((recommendation) => (
+                <article className={adminCardClass} key={recommendation.id}>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <div className="h-32 w-full shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:h-24 sm:w-32">
+                      <img
+                        alt=""
+                        className="h-full w-full object-cover"
+                        onError={(event) => {
+                          event.currentTarget.src = "/assets/konjiam-map-base.png";
+                        }}
+                        src={recommendation.imageUrl}
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-800">
+                          {recommendation.category}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2.5 py-1 text-xs font-bold",
+                            recommendation.isVisible
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-gray-100 text-gray-500",
+                          )}
+                        >
+                          {recommendation.isVisible ? "노출" : "숨김"}
+                        </span>
+                      </div>
+                      <h3 className="mt-2 line-clamp-2 font-bold text-gray-950">
+                        {recommendation.title}
+                      </h3>
+                      <p className="mt-1 line-clamp-1 text-sm font-semibold text-gray-600">
+                        {recommendation.locationLabel}
+                      </p>
+                      <p className="mt-2 line-clamp-2 text-sm leading-5 text-gray-500">
+                        {recommendation.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                    <Button
+                      className="px-3"
+                      icon={<Pencil className="h-4 w-4" />}
+                      onClick={() => openRecommendationEditModal(recommendation)}
+                      variant="secondary"
+                    >
+                      수정
+                    </Button>
+                    <Button
+                      className="px-3"
+                      icon={<Trash2 className="h-4 w-4" />}
+                      onClick={() => handleDeleteRecommendation(recommendation)}
+                      variant="danger"
+                    >
+                      삭제
+                    </Button>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+                등록된 추천 코스가 없습니다.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {isLocationAddModalOpen ? (
+        <AdminModal
+          title="장소 추가"
+          description="지도 필터와 일정 연결에 사용할 장소를 추가합니다."
+          onClose={() => {
+            resetLocationDraft();
+            setIsLocationAddModalOpen(false);
+          }}
+        >
+          <form className="space-y-4" onSubmit={handleAddMapLocation}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>장소명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationDraft({ ...locationDraft, name: event.target.value })
+                  }
+                  placeholder="새 장소"
+                  value={locationDraft.name}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>카테고리</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationDraft({
+                      ...locationDraft,
+                      category: event.target.value as MapLocationCategory,
+                    })
+                  }
+                  value={locationDraft.category}
+                >
+                  {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationDraft({ ...locationDraft, description: event.target.value })
+                  }
+                  placeholder="운영 메모 또는 장소 설명"
+                  value={locationDraft.description}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>X 좌표</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationDraft({ ...locationDraft, xPercent: event.target.value })
+                  }
+                  type="number"
+                  value={locationDraft.xPercent}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>Y 좌표</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationDraft({ ...locationDraft, yPercent: event.target.value })
+                  }
+                  type="number"
+                  value={locationDraft.yPercent}
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                <input
+                  checked={locationDraft.isWorkshopLocation}
+                  onChange={(event) =>
+                    setLocationDraft({
+                      ...locationDraft,
+                      isWorkshopLocation: event.target.checked,
+                    })
+                  }
+                  type="checkbox"
+                />
+                워크숍 사용 장소
+              </label>
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                <input
+                  checked={locationDraft.isSmokingArea}
+                  onChange={(event) =>
+                    setLocationDraft({
+                      ...locationDraft,
+                      isSmokingArea: event.target.checked,
+                    })
+                  }
+                  type="checkbox"
+                />
+                흡연구역
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  resetLocationDraft();
+                  setIsLocationAddModalOpen(false);
+                }}
+                variant="secondary"
+              >
+                취소
+              </Button>
+              <Button disabled={!locationDraft.name.trim()} icon={<Plus className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {isScheduleAddModalOpen ? (
+        <AdminModal
+          title="일정 추가"
+          description="시작/종료 시간과 지도 장소 연결을 입력합니다."
+          onClose={closeScheduleAddModal}
+        >
+          <form className="space-y-4" onSubmit={handleAddScheduleItem}>
+            <div className="grid gap-3 md:grid-cols-2">
               <label>
                 <span className={labelClass}>시작</span>
                 <input
@@ -1367,6 +1985,16 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 />
               </label>
               <label>
+                <span className={labelClass}>프로그램명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleDraft({ ...scheduleDraft, title: event.target.value })
+                  }
+                  value={scheduleDraft.title}
+                />
+              </label>
+              <label>
                 <span className={labelClass}>구분</span>
                 <select
                   className={fieldClass}
@@ -1386,27 +2014,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 </select>
               </label>
               <label>
-                <span className={labelClass}>제목</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setScheduleDraft({ ...scheduleDraft, title: event.target.value })
-                  }
-                  value={scheduleDraft.title}
-                />
-              </label>
-              <label>
-                <span className={labelClass}>설명</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setScheduleDraft({ ...scheduleDraft, description: event.target.value })
-                  }
-                  value={scheduleDraft.description}
-                />
-              </label>
-              <label>
-                <span className={labelClass}>장소</span>
+                <span className={labelClass}>장소명</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
@@ -1415,295 +2023,95 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   value={scheduleDraft.location}
                 />
               </label>
-            </div>
-            <label className="mt-3 block">
-              <span className={labelClass}>지도 장소 연결</span>
-              <select
-                className={fieldClass}
-                onChange={(event) =>
-                  setScheduleDraft({ ...scheduleDraft, locationId: event.target.value })
-                }
-                value={scheduleDraft.locationId}
-              >
-                <option value="">연결 없음</option>
-                {selectedGuide.map.locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </form>
-
-          <div className={`${panelClass} overflow-hidden p-0`}>
-            <div className="border-b border-gray-200 p-4">
-              <h2 className="font-bold">일정 목록</h2>
-            </div>
-            <div className="space-y-3 p-4 md:hidden">
-              {selectedGuide.schedule.map((scheduleItem, index) => (
-                <section className="rounded-lg border border-gray-200 bg-white p-3" key={scheduleItem.id}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-gray-500">#{index + 1}</span>
-                    <div className="flex gap-1">
-                      <button
-                        aria-label="위로"
-                        className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                        onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "up")}
-                        type="button"
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </button>
-                      <button
-                        aria-label="아래로"
-                        className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                        onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "down")}
-                        type="button"
-                      >
-                        <ArrowDown className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid gap-3">
-                    <label>
-                      <span className={labelClass}>시작</span>
-                      <input
-                        className={fieldClass}
-                        onChange={(event) =>
-                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                            startAt: getIsoDateTimeValue(event.target.value),
-                          })
-                        }
-                        type="datetime-local"
-                        value={getLocalDateTimeValue(scheduleItem.startAt)}
-                      />
-                    </label>
-                    <label>
-                      <span className={labelClass}>종료</span>
-                      <input
-                        className={fieldClass}
-                        onChange={(event) =>
-                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                            endAt: getIsoDateTimeValue(event.target.value),
-                          })
-                        }
-                        type="datetime-local"
-                        value={getLocalDateTimeValue(scheduleItem.endAt)}
-                      />
-                    </label>
-                    <label>
-                      <span className={labelClass}>제목</span>
-                      <input
-                        className={fieldClass}
-                        onChange={(event) =>
-                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                            title: event.target.value,
-                          })
-                        }
-                        value={scheduleItem.title}
-                      />
-                    </label>
-                    <label>
-                      <span className={labelClass}>설명</span>
-                      <input
-                        className={fieldClass}
-                        onChange={(event) =>
-                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                            description: event.target.value,
-                          })
-                        }
-                        value={scheduleItem.description}
-                      />
-                    </label>
-                    <label>
-                      <span className={labelClass}>장소</span>
-                      <input
-                        className={fieldClass}
-                        onChange={(event) =>
-                          updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                            location: event.target.value,
-                          })
-                        }
-                        value={scheduleItem.location}
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <Button
-                      onClick={() =>
-                        updateScheduleControl(selectedGuide.id, {
-                          mode: "manual",
-                          manualCurrentScheduleId: scheduleItem.id,
-                        })
-                      }
-                      variant="secondary"
-                    >
-                      현재 지정
-                    </Button>
-                    <Button
-                      icon={<Trash2 className="h-4 w-4" />}
-                      onClick={() => deleteScheduleItem(selectedGuide.id, scheduleItem.id)}
-                      variant="danger"
-                    >
-                      삭제
-                    </Button>
-                  </div>
-                </section>
-              ))}
-            </div>
-            <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[64rem] text-left text-sm">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3">순서</th>
-                    <th className="px-4 py-3">시작</th>
-                    <th className="px-4 py-3">종료</th>
-                    <th className="px-4 py-3">제목</th>
-                    <th className="px-4 py-3">설명</th>
-                    <th className="px-4 py-3">장소</th>
-                    <th className="px-4 py-3">동작</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedGuide.schedule.map((scheduleItem, index) => (
-                    <tr className="border-t border-gray-100" key={scheduleItem.id}>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button
-                            aria-label="위로"
-                            className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                            onClick={() => moveScheduleItem(selectedGuide.id, scheduleItem.id, "up")}
-                            type="button"
-                          >
-                            <ArrowUp className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label="아래로"
-                            className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
-                            onClick={() =>
-                              moveScheduleItem(selectedGuide.id, scheduleItem.id, "down")
-                            }
-                            type="button"
-                          >
-                            <ArrowDown className="h-4 w-4" />
-                          </button>
-                          <span className="self-center text-gray-500">{index + 1}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(event) =>
-                            updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                              startAt: getIsoDateTimeValue(event.target.value),
-                            })
-                          }
-                          type="datetime-local"
-                          value={getLocalDateTimeValue(scheduleItem.startAt)}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(event) =>
-                            updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                              endAt: getIsoDateTimeValue(event.target.value),
-                            })
-                          }
-                          type="datetime-local"
-                          value={getLocalDateTimeValue(scheduleItem.endAt)}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(event) =>
-                            updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                              title: event.target.value,
-                            })
-                          }
-                          value={scheduleItem.title}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(event) =>
-                            updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                              description: event.target.value,
-                            })
-                          }
-                          value={scheduleItem.description}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(event) =>
-                            updateScheduleItem(selectedGuide.id, scheduleItem.id, {
-                              location: event.target.value,
-                            })
-                          }
-                          value={scheduleItem.location}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          <Button
-                            onClick={() =>
-                              updateScheduleControl(selectedGuide.id, {
-                                mode: "manual",
-                                manualCurrentScheduleId: scheduleItem.id,
-                              })
-                            }
-                            variant="secondary"
-                          >
-                            현재 지정
-                          </Button>
-                          <Button
-                            icon={<Trash2 className="h-4 w-4" />}
-                            onClick={() => deleteScheduleItem(selectedGuide.id, scheduleItem.id)}
-                            variant="danger"
-                          >
-                            삭제
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
+              <label>
+                <span className={labelClass}>지도 장소 연결</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleDraft({ ...scheduleDraft, locationId: event.target.value })
+                  }
+                  value={scheduleDraft.locationId}
+                >
+                  <option value="">연결 없음</option>
+                  {selectedGuide.map.locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
                   ))}
-                </tbody>
-              </table>
+                </select>
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <textarea
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleDraft({ ...scheduleDraft, description: event.target.value })
+                  }
+                  rows={3}
+                  value={scheduleDraft.description}
+                />
+              </label>
             </div>
-          </div>
-        </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button onClick={closeScheduleAddModal} variant="secondary">
+                취소
+              </Button>
+              <Button
+                disabled={!scheduleDraft.title.trim() || !scheduleDraft.startAt || !scheduleDraft.endAt}
+                icon={<Plus className="h-4 w-4" />}
+                type="submit"
+              >
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
       ) : null}
 
-      {activeSection === "events" ? (
-        <div className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
-          <aside className={`${panelClass} h-fit`}>
-            <form className="space-y-3" onSubmit={handleAddEvent}>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="font-bold">이벤트 선택</h2>
-                <Button icon={<Plus className="h-4 w-4" />} type="submit">
-                  추가
-                </Button>
-              </div>
+      {isEventAddModalOpen ? (
+        <AdminModal
+          title="이벤트 추가"
+          description="기존 템플릿 기반으로 이벤트를 추가합니다."
+          onClose={() => {
+            setEventTitle("");
+            setEventTemplateId("activity");
+            setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+            setEventStatus("waiting");
+            setIsEventAddModalOpen(false);
+          }}
+        >
+          <form className="space-y-4" onSubmit={handleAddEvent}>
+            <label className="block">
+              <span className={labelClass}>이벤트명</span>
               <input
-                className={compactFieldClass}
+                className={fieldClass}
                 onChange={(event) => setEventTitle(event.target.value)}
-                placeholder="이벤트명"
+                placeholder="비워두면 템플릿 이름을 사용합니다."
                 value={eventTitle}
               />
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>템플릿</span>
                 <select
-                  className={compactFieldClass}
-                  onChange={(event) => setEventTemplateId(event.target.value as EventTemplateId)}
+                  className={fieldClass}
+                  onChange={(event) => {
+                    const nextTemplateId = event.target.value as EventTemplateId;
+                    setEventTemplateId(nextTemplateId);
+                    setEventRequiresTeamAssignment(
+                      eventTemplateRequiresTeamAssignment[nextTemplateId],
+                    );
+                  }}
                   value={eventTemplateId}
                 >
                   <option value="activity">액티비티 사전 설문</option>
                   <option value="bowling">볼링 대회 레벨 테스트</option>
                 </select>
+              </label>
+              <label>
+                <span className={labelClass}>상태</span>
                 <select
-                  className={compactFieldClass}
+                  className={fieldClass}
                   onChange={(event) => setEventStatus(event.target.value as EventStatus)}
                   value={eventStatus}
                 >
@@ -1713,710 +2121,56 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                     </option>
                   ))}
                 </select>
-              </div>
-            </form>
-
-            <div className="mt-4 space-y-2 border-t border-gray-100 pt-4">
-              {selectedGuide.events.length > 0 ? (
-                selectedGuide.events.map((eventItem) => {
-                  const isSelected = selectedAdminEvent?.id === eventItem.id;
-
-                  return (
-                    <button
-                      className={cn(
-                        "w-full rounded-lg border px-3 py-3 text-left transition",
-                        isSelected
-                          ? "border-brand-600 bg-brand-50"
-                          : "border-gray-200 bg-white hover:bg-gray-50",
-                      )}
-                      key={eventItem.id}
-                      onClick={() => setSelectedEventId(eventItem.id)}
-                      type="button"
-                    >
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-1 text-[11px] font-bold",
-                          isSelected ? "bg-brand-700 text-white" : "bg-gray-100 text-gray-600",
-                        )}
-                      >
-                        {eventStatusLabels[eventItem.status]}
-                      </span>
-                      <p className="mt-2 text-sm font-bold text-gray-950">{eventItem.title}</p>
-                      <p className="mt-1 text-xs font-semibold text-gray-500">
-                        {eventItem.requiresTeamAssignment ? "조 배정 필요" : "조 배정 없음"}
-                      </p>
-                    </button>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-gray-500">등록된 이벤트가 없습니다.</p>
-              )}
+              </label>
             </div>
-          </aside>
-
-          {selectedAdminEvent ? (
-            (() => {
-              const groupDraft = groupDrafts[selectedAdminEvent.id] ?? {
-                teamName: "",
-                membersText: "",
-                memo: "",
-              };
-
-              return (
-                <div className="space-y-4">
-                  <section className={panelClass}>
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <p className="text-xs font-bold text-brand-700">선택한 이벤트</p>
-                        <h2 className="mt-1 text-xl font-bold text-gray-950">
-                          {selectedAdminEvent.title}
-                        </h2>
-                      </div>
-                      <Button
-                        icon={<Trash2 className="h-4 w-4" />}
-                        onClick={() => {
-                          deleteEvent(selectedGuide.id, selectedAdminEvent.id);
-                          setSelectedEventId(undefined);
-                        }}
-                        variant="danger"
-                      >
-                        삭제
-                      </Button>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <label>
-                        <span className={labelClass}>이벤트명</span>
-                        <input
-                          className={fieldClass}
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              title: inputEvent.target.value,
-                            })
-                          }
-                          value={selectedAdminEvent.title}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>상태</span>
-                        <select
-                          className={fieldClass}
-                          onChange={(selectEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              status: selectEvent.target.value as EventStatus,
-                            })
-                          }
-                          value={selectedAdminEvent.status}
-                        >
-                          {Object.entries(eventStatusLabels).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="md:col-span-2">
-                        <span className={labelClass}>설명</span>
-                        <input
-                          className={fieldClass}
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              description: inputEvent.target.value,
-                            })
-                          }
-                          value={selectedAdminEvent.description}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>오픈</span>
-                        <input
-                          className={fieldClass}
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              opensAt: getIsoDateTimeValue(inputEvent.target.value),
-                            })
-                          }
-                          type="datetime-local"
-                          value={getLocalDateTimeValue(selectedAdminEvent.opensAt)}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>종료</span>
-                        <input
-                          className={fieldClass}
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              closesAt: getIsoDateTimeValue(inputEvent.target.value),
-                            })
-                          }
-                          type="datetime-local"
-                          value={getLocalDateTimeValue(selectedAdminEvent.closesAt)}
-                        />
-                      </label>
-                      <label className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-gray-700">
-                        <input
-                          checked={selectedAdminEvent.requiresTeamAssignment}
-                          className="h-4 w-4 accent-brand-700"
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              requiresTeamAssignment: inputEvent.target.checked,
-                            })
-                          }
-                          type="checkbox"
-                        />
-                        조 배정 필요
-                      </label>
-                      <label>
-                        <span className={labelClass}>관리자 메모</span>
-                        <input
-                          className={fieldClass}
-                          onChange={(inputEvent) =>
-                            updateEvent(selectedGuide.id, selectedAdminEvent.id, {
-                              resultSummary: inputEvent.target.value,
-                            })
-                          }
-                          value={selectedAdminEvent.resultSummary ?? ""}
-                        />
-                      </label>
-                    </div>
-                  </section>
-
-                  <section className={panelClass}>
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="font-bold">설문 문항</h3>
-                      <Button
-                        icon={<Plus className="h-4 w-4" />}
-                        onClick={() =>
-                          addSurveyQuestion(selectedGuide.id, selectedAdminEvent.id, createQuestion())
-                        }
-                        variant="secondary"
-                      >
-                        문항 추가
-                      </Button>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      {selectedAdminEvent.survey.length > 0 ? (
-                        selectedAdminEvent.survey.map((question, questionIndex) => (
-                          <div
-                            className="rounded-lg border border-gray-100 bg-gray-50 p-3"
-                            key={question.id}
-                          >
-                            <div className="grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)_auto]">
-                              <select
-                                className={compactFieldClass}
-                                onChange={(selectEvent) =>
-                                  updateSurveyQuestion(
-                                    selectedGuide.id,
-                                    selectedAdminEvent.id,
-                                    question.id,
-                                    {
-                                      type: selectEvent.target.value as SurveyQuestionType,
-                                    },
-                                  )
-                                }
-                                value={question.type}
-                              >
-                                {Object.entries(surveyTypeLabels).map(([value, label]) => (
-                                  <option key={value} value={value}>
-                                    {label}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                className={compactFieldClass}
-                                onChange={(inputEvent) =>
-                                  updateSurveyQuestion(
-                                    selectedGuide.id,
-                                    selectedAdminEvent.id,
-                                    question.id,
-                                    { label: inputEvent.target.value },
-                                  )
-                                }
-                                value={question.label}
-                              />
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  disabled={questionIndex === 0}
-                                  icon={<ArrowUp className="h-4 w-4" />}
-                                  onClick={() =>
-                                    moveSurveyQuestion(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      question.id,
-                                      "up",
-                                    )
-                                  }
-                                  variant="secondary"
-                                >
-                                  위
-                                </Button>
-                                <Button
-                                  disabled={questionIndex === selectedAdminEvent.survey.length - 1}
-                                  icon={<ArrowDown className="h-4 w-4" />}
-                                  onClick={() =>
-                                    moveSurveyQuestion(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      question.id,
-                                      "down",
-                                    )
-                                  }
-                                  variant="secondary"
-                                >
-                                  아래
-                                </Button>
-                                <Button
-                                  icon={<Trash2 className="h-4 w-4" />}
-                                  onClick={() =>
-                                    deleteSurveyQuestion(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      question.id,
-                                    )
-                                  }
-                                  variant="danger"
-                                >
-                                  삭제
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="mt-3 grid gap-3 md:grid-cols-2">
-                              <input
-                                className={compactFieldClass}
-                                onChange={(inputEvent) =>
-                                  updateSurveyQuestion(
-                                    selectedGuide.id,
-                                    selectedAdminEvent.id,
-                                    question.id,
-                                    { description: inputEvent.target.value },
-                                  )
-                                }
-                                placeholder="문항 설명"
-                                value={question.description ?? ""}
-                              />
-                              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                                <input
-                                  checked={question.required ?? false}
-                                  className="h-4 w-4 accent-brand-700"
-                                  onChange={(inputEvent) =>
-                                    updateSurveyQuestion(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      question.id,
-                                      { required: inputEvent.target.checked },
-                                    )
-                                  }
-                                  type="checkbox"
-                                />
-                                필수
-                              </label>
-                            </div>
-                            {question.type === "singleChoice" ||
-                            question.type === "multipleChoice" ? (
-                              <input
-                                className={`${compactFieldClass} mt-3`}
-                                onChange={(inputEvent) =>
-                                  updateSurveyQuestion(
-                                    selectedGuide.id,
-                                    selectedAdminEvent.id,
-                                    question.id,
-                                    {
-                                      options: inputEvent.target.value
-                                        .split(",")
-                                        .map((option) => option.trim())
-                                        .filter(Boolean),
-                                    },
-                                  )
-                                }
-                                placeholder="옵션을 쉼표로 구분"
-                                value={question.options?.join(", ") ?? ""}
-                              />
-                            ) : null}
-                          </div>
-                        ))
-                      ) : (
-                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                          등록된 문항이 없습니다.
-                        </p>
-                      )}
-                    </div>
-                  </section>
-
-                  <section className={`${panelClass} overflow-hidden p-0`}>
-                    <div className="border-b border-gray-200 p-4">
-                      <h3 className="font-bold">응답 관리</h3>
-                    </div>
-                    <div className="space-y-3 p-4 md:hidden">
-                      {selectedEventResponses.length > 0 ? (
-                        selectedEventResponses.map((response) => (
-                          <section className="rounded-lg border border-gray-200 bg-white p-3" key={response.id}>
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <p className="font-bold text-gray-950">{response.participantName}</p>
-                              <p className="text-xs font-semibold text-gray-500">
-                                {new Date(response.submittedAt).toLocaleString("ko-KR")}
-                              </p>
-                            </div>
-                            <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
-                              {Object.entries(response.answers).map(([questionId, answer]) => {
-                                const question = selectedAdminEvent.survey.find(
-                                  (item) => item.id === questionId,
-                                );
-
-                                return (
-                                  <p key={questionId}>
-                                    <span className="font-semibold text-gray-950">
-                                      {question?.label ?? questionId}:
-                                    </span>{" "}
-                                    {formatAnswerValue(answer)}
-                                  </p>
-                                );
-                              })}
-                            </div>
-                          </section>
-                        ))
-                      ) : (
-                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                          이 이벤트에 저장된 응답이 없습니다.
-                        </p>
-                      )}
-                    </div>
-                    <div className="hidden overflow-x-auto md:block">
-                      <table className="w-full min-w-[48rem] text-left text-sm">
-                        <thead className="bg-gray-50 text-gray-500">
-                          <tr>
-                            <th className="px-4 py-3">응답자</th>
-                            <th className="px-4 py-3">제출 시간</th>
-                            <th className="px-4 py-3">답변</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedEventResponses.length > 0 ? (
-                            selectedEventResponses.map((response) => (
-                              <tr className="border-t border-gray-100" key={response.id}>
-                                <td className="px-4 py-3 font-semibold">
-                                  {response.participantName}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {new Date(response.submittedAt).toLocaleString("ko-KR")}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="space-y-1">
-                                    {Object.entries(response.answers).map(([questionId, answer]) => {
-                                      const question = selectedAdminEvent.survey.find(
-                                        (item) => item.id === questionId,
-                                      );
-
-                                      return (
-                                        <p key={questionId}>
-                                          <span className="font-semibold">
-                                            {question?.label ?? questionId}:
-                                          </span>{" "}
-                                          {formatAnswerValue(answer)}
-                                        </p>
-                                      );
-                                    })}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td className="px-4 py-8 text-center text-gray-500" colSpan={3}>
-                                이 이벤트에 저장된 응답이 없습니다.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-
-                  {selectedAdminEvent.requiresTeamAssignment ? (
-                    <section className={panelClass}>
-                      <h3 className="font-bold">조 배정 관리</h3>
-                      <div className="mt-3 grid gap-2 md:grid-cols-[12rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
-                        <input
-                          className={compactFieldClass}
-                          onChange={(inputEvent) =>
-                            setGroupDrafts({
-                              ...groupDrafts,
-                              [selectedAdminEvent.id]: {
-                                ...groupDraft,
-                                teamName: inputEvent.target.value,
-                              },
-                            })
-                          }
-                          placeholder="조 이름"
-                          value={groupDraft.teamName}
-                        />
-                        <input
-                          className={compactFieldClass}
-                          onChange={(inputEvent) =>
-                            setGroupDrafts({
-                              ...groupDrafts,
-                              [selectedAdminEvent.id]: {
-                                ...groupDraft,
-                                membersText: inputEvent.target.value,
-                              },
-                            })
-                          }
-                          placeholder="참가자명을 쉼표로 구분"
-                          value={groupDraft.membersText}
-                        />
-                        <input
-                          className={compactFieldClass}
-                          onChange={(inputEvent) =>
-                            setGroupDrafts({
-                              ...groupDrafts,
-                              [selectedAdminEvent.id]: {
-                                ...groupDraft,
-                                memo: inputEvent.target.value,
-                              },
-                            })
-                          }
-                          placeholder="메모"
-                          value={groupDraft.memo}
-                        />
-                        <Button
-                          onClick={() => {
-                            if (!groupDraft.teamName.trim()) {
-                              return;
-                            }
-
-                            addEventTeam(selectedGuide.id, selectedAdminEvent.id, {
-                              id: createId("team"),
-                              eventId: selectedAdminEvent.id,
-                              name: groupDraft.teamName.trim(),
-                              members: groupDraft.membersText
-                                .split(",")
-                                .map((member) => member.trim())
-                                .filter(Boolean),
-                              memo: groupDraft.memo.trim(),
-                            });
-                            setGroupDrafts({
-                              ...groupDrafts,
-                              [selectedAdminEvent.id]: {
-                                teamName: "",
-                                membersText: "",
-                                memo: "",
-                              },
-                            });
-                          }}
-                          variant="secondary"
-                        >
-                          추가
-                        </Button>
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {selectedAdminEvent.teams.length > 0 ? (
-                          selectedAdminEvent.teams.map((team) => (
-                            <div
-                              className="rounded-lg border border-gray-100 bg-gray-50 p-3"
-                              key={team.id}
-                            >
-                              <div className="grid gap-2 md:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)_auto]">
-                                <input
-                                  className={compactFieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      team.id,
-                                      { name: inputEvent.target.value },
-                                    )
-                                  }
-                                  value={team.name}
-                                />
-                                <input
-                                  className={compactFieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      team.id,
-                                      {
-                                        members: inputEvent.target.value
-                                          .split(",")
-                                          .map((member) => member.trim())
-                                          .filter(Boolean),
-                                      },
-                                    )
-                                  }
-                                  value={team.members.join(", ")}
-                                />
-                                <input
-                                  className={compactFieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      team.id,
-                                      { memo: inputEvent.target.value },
-                                    )
-                                  }
-                                  value={team.memo ?? ""}
-                                />
-                                <Button
-                                  icon={<Trash2 className="h-4 w-4" />}
-                                  onClick={() =>
-                                    deleteEventTeam(
-                                      selectedGuide.id,
-                                      selectedAdminEvent.id,
-                                      team.id,
-                                    )
-                                  }
-                                  variant="danger"
-                                >
-                                  삭제
-                                </Button>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-gray-500">생성된 조가 없습니다.</p>
-                        )}
-                      </div>
-
-                      <div className="mt-5 space-y-3 border-t border-gray-100 pt-4 md:hidden">
-                        {selectedEventResponses.length > 0 ? (
-                          selectedEventResponses.map((response) => {
-                            const assignedTeam =
-                              selectedAdminEvent.teams.find(
-                                (team) => team.id === response.assignedTeamId,
-                              ) ??
-                              selectedAdminEvent.teams.find((team) =>
-                                team.members.includes(response.participantName),
-                              );
-
-                            return (
-                              <section
-                                className="rounded-lg border border-gray-200 bg-white p-3"
-                                key={response.id}
-                              >
-                                <p className="font-bold text-gray-950">{response.participantName}</p>
-                                <label className="mt-3 block">
-                                  <span className={labelClass}>배정 조</span>
-                                  <select
-                                    className={fieldClass}
-                                    onChange={(selectEvent) =>
-                                      assignEventResponseTeam(
-                                        selectedGuide.id,
-                                        selectedAdminEvent.id,
-                                        response.participantName,
-                                        selectEvent.target.value || undefined,
-                                      )
-                                    }
-                                    value={assignedTeam?.id ?? ""}
-                                  >
-                                    <option value="">미배정</option>
-                                    {selectedAdminEvent.teams.map((team) => (
-                                      <option key={team.id} value={team.id}>
-                                        {team.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </label>
-                              </section>
-                            );
-                          })
-                        ) : (
-                          <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                            조를 배정할 응답자가 없습니다.
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-5 hidden overflow-x-auto border-t border-gray-100 pt-4 md:block">
-                        <table className="w-full min-w-[38rem] text-left text-sm">
-                          <thead className="text-gray-500">
-                            <tr>
-                              <th className="px-3 py-2">응답자</th>
-                              <th className="px-3 py-2">배정 조</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedEventResponses.length > 0 ? (
-                              selectedEventResponses.map((response) => {
-                                const assignedTeam =
-                                  selectedAdminEvent.teams.find(
-                                    (team) => team.id === response.assignedTeamId,
-                                  ) ??
-                                  selectedAdminEvent.teams.find((team) =>
-                                    team.members.includes(response.participantName),
-                                  );
-
-                                return (
-                                  <tr className="border-t border-gray-100" key={response.id}>
-                                    <td className="px-3 py-2 font-semibold">
-                                      {response.participantName}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <select
-                                        className={compactFieldClass}
-                                        onChange={(selectEvent) =>
-                                          assignEventResponseTeam(
-                                            selectedGuide.id,
-                                            selectedAdminEvent.id,
-                                            response.participantName,
-                                            selectEvent.target.value || undefined,
-                                          )
-                                        }
-                                        value={assignedTeam?.id ?? ""}
-                                      >
-                                        <option value="">미배정</option>
-                                        {selectedAdminEvent.teams.map((team) => (
-                                          <option key={team.id} value={team.id}>
-                                            {team.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                  </tr>
-                                );
-                              })
-                            ) : (
-                              <tr>
-                                <td className="px-3 py-6 text-center text-gray-500" colSpan={2}>
-                                  조를 배정할 응답자가 없습니다.
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                  ) : (
-                    <section className={panelClass}>
-                      <h3 className="font-bold">조 배정 관리</h3>
-                      <p className="mt-2 text-sm leading-6 text-gray-600">
-                        이 이벤트는 조 배정이 필요 없는 설문입니다.
-                      </p>
-                    </section>
-                  )}
-                </div>
-              );
-            })()
-          ) : (
-            <Card>
-              <p className="text-sm text-gray-500">관리할 이벤트를 추가해 주세요.</p>
-            </Card>
-          )}
-        </div>
-      ) : null}
-
-      {activeSection === "recommendations" ? (
-        <div className="space-y-4">
-          <form className={panelClass} onSubmit={handleAddRecommendation}>
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-bold">추천 코스 추가</h2>
+            <label className="block rounded-lg bg-gray-50 p-3">
+              <span className="inline-flex min-h-6 items-center gap-2 text-sm font-semibold text-gray-700">
+                <input
+                  checked={eventRequiresTeamAssignment}
+                  className="h-4 w-4 accent-brand-700"
+                  onChange={(event) => setEventRequiresTeamAssignment(event.target.checked)}
+                  type="checkbox"
+                />
+                조 배치 사용
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-gray-500">
+                체크하면 응답자를 조별로 배정하고 참가자가 자기 조를 확인할 수 있습니다.
+              </span>
+            </label>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  setEventTitle("");
+                  setEventTemplateId("activity");
+                  setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+                  setEventStatus("waiting");
+                  setIsEventAddModalOpen(false);
+                }}
+                variant="secondary"
+              >
+                취소
+              </Button>
               <Button icon={<Plus className="h-4 w-4" />} type="submit">
-                추가
+                저장
               </Button>
             </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {isRecommendationAddModalOpen ? (
+        <AdminModal
+          title="추천 코스 추가"
+          description="참가자 추천 탭에 보일 코스를 추가합니다."
+          onClose={() => {
+            resetRecommendationDraft();
+            setIsRecommendationAddModalOpen(false);
+          }}
+        >
+          <form className="space-y-4" onSubmit={handleAddRecommendation}>
+            <div className="grid gap-3 md:grid-cols-2">
               <label>
-                <span className={labelClass}>제목</span>
+                <span className={labelClass}>코스명</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
@@ -2429,7 +2183,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 />
               </label>
               <label>
-                <span className={labelClass}>위치</span>
+                <span className={labelClass}>관련 장소</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
@@ -2442,7 +2196,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 />
               </label>
               <label>
-                <span className={labelClass}>분류</span>
+                <span className={labelClass}>태그/소요시간</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
@@ -2477,117 +2231,1156 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                       description: event.target.value,
                     })
                   }
-                  rows={3}
+                  rows={4}
                   value={recommendationDraft.description}
                 />
               </label>
-              <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
+            </div>
+            <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+              <input
+                checked={recommendationDraft.isVisible}
+                onChange={(event) =>
+                  setRecommendationDraft({
+                    ...recommendationDraft,
+                    isVisible: event.target.checked,
+                  })
+                }
+                type="checkbox"
+              />
+              노출
+            </label>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  resetRecommendationDraft();
+                  setIsRecommendationAddModalOpen(false);
+                }}
+                variant="secondary"
+              >
+                취소
+              </Button>
+              <Button disabled={!recommendationDraft.title.trim()} icon={<Plus className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {locationEditDraft ? (
+        <AdminModal
+          title="장소 수정"
+          description="지도 필터와 일정 연결에 쓰이는 장소 정보입니다."
+          onClose={() => setLocationEditDraft(null)}
+        >
+          <form className="space-y-4" onSubmit={handleSaveLocationEdit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>장소명</span>
                 <input
-                  checked={recommendationDraft.isVisible}
+                  className={fieldClass}
                   onChange={(event) =>
-                    setRecommendationDraft({
-                      ...recommendationDraft,
-                      isVisible: event.target.checked,
+                    setLocationEditDraft({ ...locationEditDraft, name: event.target.value })
+                  }
+                  value={locationEditDraft.name}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>카테고리</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationEditDraft({
+                      ...locationEditDraft,
+                      category: event.target.value as MapLocationCategory,
+                    })
+                  }
+                  value={locationEditDraft.category}
+                >
+                  {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationEditDraft({
+                      ...locationEditDraft,
+                      description: event.target.value,
+                    })
+                  }
+                  value={locationEditDraft.description}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>X 좌표</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationEditDraft({ ...locationEditDraft, xPercent: event.target.value })
+                  }
+                  type="number"
+                  value={locationEditDraft.xPercent}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>Y 좌표</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setLocationEditDraft({ ...locationEditDraft, yPercent: event.target.value })
+                  }
+                  type="number"
+                  value={locationEditDraft.yPercent}
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                <input
+                  checked={locationEditDraft.isWorkshopLocation}
+                  onChange={(event) =>
+                    setLocationEditDraft({
+                      ...locationEditDraft,
+                      isWorkshopLocation: event.target.checked,
                     })
                   }
                   type="checkbox"
                 />
-                노출
+                워크숍 사용 장소
+              </label>
+              <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                <input
+                  checked={locationEditDraft.isSmokingArea}
+                  onChange={(event) =>
+                    setLocationEditDraft({
+                      ...locationEditDraft,
+                      isSmokingArea: event.target.checked,
+                    })
+                  }
+                  type="checkbox"
+                />
+                흡연구역
               </label>
             </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button onClick={() => setLocationEditDraft(null)} variant="secondary">
+                취소
+              </Button>
+              <Button icon={<Check className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
           </form>
+        </AdminModal>
+      ) : null}
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            {selectedGuide.recommendations.map((recommendation) => (
-              <section className={panelClass} key={recommendation.id}>
-                <div className="flex flex-col gap-3 sm:flex-row">
-                  <div className="h-32 w-full shrink-0 overflow-hidden rounded-lg bg-gray-100 sm:h-20 sm:w-28">
-                    <img
-                      alt=""
-                      className="h-full w-full object-cover"
-                      onError={(event) => {
-                        event.currentTarget.src = "/assets/konjiam-map-base.png";
-                      }}
-                      src={recommendation.imageUrl}
-                    />
-                  </div>
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <input
-                      className={compactFieldClass}
-                      onChange={(event) =>
-                        updateRecommendation(selectedGuide.id, recommendation.id, {
-                          title: event.target.value,
-                        })
-                      }
-                      value={recommendation.title}
-                    />
-                    <input
-                      className={compactFieldClass}
-                      onChange={(event) =>
-                        updateRecommendation(selectedGuide.id, recommendation.id, {
-                          locationLabel: event.target.value,
-                        })
-                      }
-                      value={recommendation.locationLabel}
-                    />
-                  </div>
-                </div>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <input
-                    className={compactFieldClass}
-                    onChange={(event) =>
-                      updateRecommendation(selectedGuide.id, recommendation.id, {
-                        category: event.target.value,
-                      })
-                    }
-                    value={recommendation.category}
-                  />
-                  <input
-                    className={compactFieldClass}
-                    onChange={(event) =>
-                      updateRecommendation(selectedGuide.id, recommendation.id, {
-                        imageUrl: event.target.value,
-                      })
-                    }
-                    value={recommendation.imageUrl}
-                  />
-                </div>
-                <textarea
-                  className={`${compactFieldClass} mt-2`}
+      {scheduleEditDraft ? (
+        <AdminModal
+          title="일정 수정"
+          description="시간, 장소 연결, 구분 정보를 수정합니다."
+          onClose={() => setScheduleEditDraft(null)}
+        >
+          <form className="space-y-4" onSubmit={handleSaveScheduleEdit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>시작</span>
+                <input
+                  className={fieldClass}
                   onChange={(event) =>
-                    updateRecommendation(selectedGuide.id, recommendation.id, {
+                    setScheduleEditDraft({ ...scheduleEditDraft, startAt: event.target.value })
+                  }
+                  type="datetime-local"
+                  value={scheduleEditDraft.startAt}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>종료</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({ ...scheduleEditDraft, endAt: event.target.value })
+                  }
+                  type="datetime-local"
+                  value={scheduleEditDraft.endAt}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>프로그램명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({ ...scheduleEditDraft, title: event.target.value })
+                  }
+                  value={scheduleEditDraft.title}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>구분</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({
+                      ...scheduleEditDraft,
+                      category: event.target.value as ScheduleCategory,
+                    })
+                  }
+                  value={scheduleEditDraft.category}
+                >
+                  {Object.entries(scheduleCategoryLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className={labelClass}>장소명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({ ...scheduleEditDraft, location: event.target.value })
+                  }
+                  value={scheduleEditDraft.location}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>지도 장소 연결</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({ ...scheduleEditDraft, locationId: event.target.value })
+                  }
+                  value={scheduleEditDraft.locationId}
+                >
+                  <option value="">연결 없음</option>
+                  {selectedGuide.map.locations.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <textarea
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setScheduleEditDraft({
+                      ...scheduleEditDraft,
                       description: event.target.value,
                     })
                   }
                   rows={3}
-                  value={recommendation.description}
+                  value={scheduleEditDraft.description}
                 />
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                  <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                    <input
-                      checked={recommendation.isVisible}
-                      onChange={(event) =>
-                        updateRecommendation(selectedGuide.id, recommendation.id, {
-                          isVisible: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                    노출
-                  </label>
-                  <Button
-                    className="w-full sm:w-auto"
-                    icon={<Trash2 className="h-4 w-4" />}
-                    onClick={() => deleteRecommendation(selectedGuide.id, recommendation.id)}
-                    variant="danger"
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button onClick={() => setScheduleEditDraft(null)} variant="secondary">
+                취소
+              </Button>
+              <Button icon={<Check className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {recommendationEditDraft ? (
+        <AdminModal
+          title="추천 코스 수정"
+          description="참가자 추천 탭에 보이는 코스 정보입니다."
+          onClose={() => setRecommendationEditDraft(null)}
+        >
+          <form className="space-y-4" onSubmit={handleSaveRecommendationEdit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>코스명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setRecommendationEditDraft({
+                      ...recommendationEditDraft,
+                      title: event.target.value,
+                    })
+                  }
+                  value={recommendationEditDraft.title}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>관련 장소</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setRecommendationEditDraft({
+                      ...recommendationEditDraft,
+                      locationLabel: event.target.value,
+                    })
+                  }
+                  value={recommendationEditDraft.locationLabel}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>태그/소요시간</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setRecommendationEditDraft({
+                      ...recommendationEditDraft,
+                      category: event.target.value,
+                    })
+                  }
+                  value={recommendationEditDraft.category}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>이미지</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setRecommendationEditDraft({
+                      ...recommendationEditDraft,
+                      imageUrl: event.target.value,
+                    })
+                  }
+                  value={recommendationEditDraft.imageUrl}
+                />
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <textarea
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setRecommendationEditDraft({
+                      ...recommendationEditDraft,
+                      description: event.target.value,
+                    })
+                  }
+                  rows={4}
+                  value={recommendationEditDraft.description}
+                />
+              </label>
+            </div>
+            <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+              <input
+                checked={recommendationEditDraft.isVisible}
+                onChange={(event) =>
+                  setRecommendationEditDraft({
+                    ...recommendationEditDraft,
+                    isVisible: event.target.checked,
+                  })
+                }
+                type="checkbox"
+              />
+              노출
+            </label>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button onClick={() => setRecommendationEditDraft(null)} variant="secondary">
+                취소
+              </Button>
+              <Button icon={<Check className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {eventEditDraft ? (
+        <AdminModal
+          title="이벤트 수정"
+          description="이벤트 기본 정보만 수정합니다. 설문과 조 배치 관리는 기존 패널에서 유지됩니다."
+          onClose={() => setEventEditDraft(null)}
+        >
+          <form className="space-y-4" onSubmit={handleSaveEventEdit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>이벤트명</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({ ...eventEditDraft, title: event.target.value })
+                  }
+                  value={eventEditDraft.title}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>상태</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({
+                      ...eventEditDraft,
+                      status: event.target.value as EventStatus,
+                    })
+                  }
+                  value={eventEditDraft.status}
+                >
+                  {Object.entries(eventStatusLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className={labelClass}>오픈</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({ ...eventEditDraft, opensAt: event.target.value })
+                  }
+                  type="datetime-local"
+                  value={eventEditDraft.opensAt}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>종료</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({ ...eventEditDraft, closesAt: event.target.value })
+                  }
+                  type="datetime-local"
+                  value={eventEditDraft.closesAt}
+                />
+              </label>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
+                <textarea
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({ ...eventEditDraft, description: event.target.value })
+                  }
+                  rows={3}
+                  value={eventEditDraft.description}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>관리자 메모</span>
+                <input
+                  className={fieldClass}
+                  onChange={(event) =>
+                    setEventEditDraft({ ...eventEditDraft, resultSummary: event.target.value })
+                  }
+                  value={eventEditDraft.resultSummary}
+                />
+              </label>
+              <label className="md:col-span-2">
+                <span className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-gray-700">
+                  <input
+                    checked={eventEditDraft.requiresTeamAssignment}
+                    className="h-4 w-4 accent-brand-700"
+                    onChange={(event) =>
+                      setEventEditDraft({
+                        ...eventEditDraft,
+                        requiresTeamAssignment: event.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                  조 배치 사용
+                </span>
+                <span className="block text-xs leading-5 text-gray-500">
+                  체크하면 응답자를 조별로 배정하고 참가자가 자기 조를 확인할 수 있습니다.
+                </span>
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <Button onClick={() => setEventEditDraft(null)} variant="secondary">
+                취소
+              </Button>
+              <Button icon={<Check className="h-4 w-4" />} type="submit">
+                저장
+              </Button>
+            </div>
+          </form>
+        </AdminModal>
+      ) : null}
+
+      {surveyManageEvent ? (
+        <AdminModal
+          title="설문 문항 관리"
+          description={surveyManageEvent.title}
+          onClose={() => setSurveyManageEventId(undefined)}
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-600">
+                  문항 {surveyManageEvent.survey.length}개
+                </p>
+              </div>
+              <Button
+                className="shrink-0"
+                icon={<Plus className="h-4 w-4" />}
+                onClick={() =>
+                  addSurveyQuestion(selectedGuide.id, surveyManageEvent.id, createQuestion())
+                }
+                variant="secondary"
+              >
+                문항 추가
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {surveyManageEvent.survey.length > 0 ? (
+                surveyManageEvent.survey.map((question, questionIndex) => (
+                  <section
+                    className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                    key={question.id}
                   >
-                    삭제
-                  </Button>
-                </div>
-              </section>
-            ))}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-gray-600 ring-1 ring-gray-200">
+                        #{questionIndex + 1}
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          aria-label="위로"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                          disabled={questionIndex === 0}
+                          onClick={() =>
+                            moveSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              "up",
+                            )
+                          }
+                          type="button"
+                        >
+                          <ArrowUp className="h-4 w-4" />
+                        </button>
+                        <button
+                          aria-label="아래로"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                          disabled={questionIndex === surveyManageEvent.survey.length - 1}
+                          onClick={() =>
+                            moveSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              "down",
+                            )
+                          }
+                          type="button"
+                        >
+                          <ArrowDown className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 md:grid-cols-[10rem_minmax(0,1fr)]">
+                      <label>
+                        <span className={labelClass}>타입</span>
+                        <select
+                          className={fieldClass}
+                          onChange={(selectEvent) =>
+                            updateSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              {
+                                type: selectEvent.target.value as SurveyQuestionType,
+                              },
+                            )
+                          }
+                          value={question.type}
+                        >
+                          {Object.entries(surveyTypeLabels).map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        <span className={labelClass}>문항</span>
+                        <input
+                          className={fieldClass}
+                          onChange={(inputEvent) =>
+                            updateSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              { label: inputEvent.target.value },
+                            )
+                          }
+                          value={question.label}
+                        />
+                      </label>
+                      <label className="md:col-span-2">
+                        <span className={labelClass}>문항 설명</span>
+                        <input
+                          className={fieldClass}
+                          onChange={(inputEvent) =>
+                            updateSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              { description: inputEvent.target.value },
+                            )
+                          }
+                          value={question.description ?? ""}
+                        />
+                      </label>
+                    </div>
+
+                    {question.type === "singleChoice" ||
+                    question.type === "multipleChoice" ? (
+                      <label className="mt-3 block">
+                        <span className={labelClass}>선택지</span>
+                        <input
+                          className={fieldClass}
+                          onChange={(inputEvent) =>
+                            updateSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              {
+                                options: inputEvent.target.value
+                                  .split(",")
+                                  .map((option) => option.trim())
+                                  .filter(Boolean),
+                              },
+                            )
+                          }
+                          placeholder="옵션을 쉼표로 구분"
+                          value={question.options?.join(", ") ?? ""}
+                        />
+                      </label>
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-200">
+                        <input
+                          checked={question.required ?? false}
+                          className="h-4 w-4 accent-brand-700"
+                          onChange={(inputEvent) =>
+                            updateSurveyQuestion(
+                              selectedGuide.id,
+                              surveyManageEvent.id,
+                              question.id,
+                              { required: inputEvent.target.checked },
+                            )
+                          }
+                          type="checkbox"
+                        />
+                        필수
+                      </label>
+                      <Button
+                        icon={<Trash2 className="h-4 w-4" />}
+                        onClick={() => {
+                          if (!window.confirm("이 문항을 삭제하시겠습니까?")) {
+                            return;
+                          }
+
+                          deleteSurveyQuestion(selectedGuide.id, surveyManageEvent.id, question.id);
+                        }}
+                        variant="danger"
+                      >
+                        삭제
+                      </Button>
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+                  등록된 문항이 없습니다. 문항 추가를 눌러 시작해 주세요.
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+        </AdminModal>
+      ) : null}
+
+      {responseManageEvent ? (
+        <AdminModal
+          title="응답/조배치 관리"
+          description={responseManageEvent.title}
+          onClose={closeResponseManageModal}
+        >
+          {(() => {
+            const groupDraft = groupDrafts[responseManageEvent.id] ?? {
+              teamName: "",
+              membersText: "",
+              memo: "",
+            };
+
+            return (
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-100 p-1 text-sm font-bold">
+                  <button
+                    className={cn(
+                      "min-h-9 rounded-md px-3 transition",
+                      responseManageTab === "summary"
+                        ? "bg-white text-gray-950 shadow-sm"
+                        : "text-gray-600",
+                    )}
+                    onClick={() => {
+                      setResponseManageTab("summary");
+                      setResponseSummaryOpenKey(undefined);
+                    }}
+                    type="button"
+                  >
+                    요약
+                  </button>
+                  <button
+                    className={cn(
+                      "min-h-9 rounded-md px-3 transition",
+                      responseManageTab === "responses"
+                        ? "bg-white text-gray-950 shadow-sm"
+                        : "text-gray-600",
+                    )}
+                    onClick={() => setResponseManageTab("responses")}
+                    type="button"
+                  >
+                    응답 목록
+                  </button>
+                  {responseManageEvent.requiresTeamAssignment ? (
+                    <button
+                      className={cn(
+                        "col-span-2 min-h-9 rounded-md px-3 transition",
+                        responseManageTab === "teams"
+                          ? "bg-white text-gray-950 shadow-sm"
+                          : "text-gray-600",
+                      )}
+                      onClick={() => setResponseManageTab("teams")}
+                      type="button"
+                    >
+                      조 배치
+                    </button>
+                  ) : null}
+                </div>
+
+                {!responseManageEvent.requiresTeamAssignment ? (
+                  <section className="rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-600">
+                    이 이벤트는 조 배치가 필요 없는 설문입니다.
+                  </section>
+                ) : null}
+
+                {responseManageTab === "summary" ? (
+                  <section>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="font-bold text-gray-950">설문 결과 요약</h3>
+                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">
+                        응답 {responseManageEventResponses.length}개
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-3">
+                      {responseManageEvent.survey.length > 0 ? (
+                        responseManageEvent.survey.map((question, questionIndex) => {
+                          if (question.type === "description") {
+                            return (
+                              <section
+                                className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                                key={question.id}
+                              >
+                                <p className="text-xs font-bold text-gray-500">
+                                  #{questionIndex + 1} 안내 문항
+                                </p>
+                                <p className="mt-1 font-bold text-gray-950">{question.label}</p>
+                              </section>
+                            );
+                          }
+
+                          if (
+                            question.type === "singleChoice" ||
+                            question.type === "multipleChoice"
+                          ) {
+                            const choiceSummary = getChoiceResponseSummary(
+                              question,
+                              responseManageEventResponses,
+                            );
+
+                            return (
+                              <section
+                                className="rounded-lg border border-gray-200 bg-white p-3"
+                                key={question.id}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-brand-700">
+                                      #{questionIndex + 1} {surveyTypeLabels[question.type]}
+                                    </p>
+                                    <h4 className="mt-1 break-words font-bold text-gray-950">
+                                      {question.label}
+                                    </h4>
+                                  </div>
+                                </div>
+                                <div className="mt-3 space-y-2">
+                                  {choiceSummary.length > 0 ? (
+                                    choiceSummary.map(({ option, participantNames }) => {
+                                      const summaryKey = `${responseManageEvent.id}:${question.id}:${option}`;
+                                      const isOpen = responseSummaryOpenKey === summaryKey;
+
+                                      return (
+                                        <div
+                                          className="rounded-lg border border-gray-100 bg-gray-50 p-2"
+                                          key={option}
+                                        >
+                                          <button
+                                            className="flex min-h-9 w-full items-center justify-between gap-2 text-left"
+                                            onClick={() =>
+                                              setResponseSummaryOpenKey(
+                                                isOpen ? undefined : summaryKey,
+                                              )
+                                            }
+                                            type="button"
+                                          >
+                                            <span className="min-w-0 break-words text-sm font-bold text-gray-950">
+                                              {option} {participantNames.length}명
+                                            </span>
+                                            <span className="shrink-0 text-xs font-bold text-brand-700">
+                                              {isOpen ? "접기" : "보기"}
+                                            </span>
+                                          </button>
+                                          {isOpen ? (
+                                            <div className="mt-2 flex flex-wrap gap-1.5 border-t border-gray-200 pt-2">
+                                              {participantNames.length > 0 ? (
+                                                participantNames.map((participantName) => (
+                                                  <span
+                                                    className="max-w-full break-words rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200"
+                                                    key={participantName}
+                                                  >
+                                                    {participantName}
+                                                  </span>
+                                                ))
+                                              ) : (
+                                                <p className="text-xs text-gray-500">
+                                                  선택한 응답자가 없습니다.
+                                                </p>
+                                              )}
+                                            </div>
+                                          ) : null}
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                                      선택지가 없습니다.
+                                    </p>
+                                  )}
+                                </div>
+                              </section>
+                            );
+                          }
+
+                          const textSummary = getShortTextResponseSummary(
+                            question,
+                            responseManageEventResponses,
+                          );
+
+                          return (
+                            <section
+                              className="rounded-lg border border-gray-200 bg-white p-3"
+                              key={question.id}
+                            >
+                              <p className="text-xs font-bold text-brand-700">
+                                #{questionIndex + 1} {surveyTypeLabels[question.type]}
+                              </p>
+                              <h4 className="mt-1 break-words font-bold text-gray-950">
+                                {question.label}
+                              </h4>
+                              <div className="mt-3 space-y-2">
+                                {textSummary.length > 0 ? (
+                                  textSummary.map((item) => (
+                                    <p
+                                      className="break-words rounded-lg bg-gray-50 p-2 text-sm leading-5 text-gray-600"
+                                      key={`${question.id}:${item.participantName}`}
+                                    >
+                                      <span className="font-bold text-gray-950">
+                                        {item.participantName}:
+                                      </span>{" "}
+                                      {item.answerText}
+                                    </p>
+                                  ))
+                                ) : (
+                                  <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                                    저장된 단답형 응답이 없습니다.
+                                  </p>
+                                )}
+                              </div>
+                            </section>
+                          );
+                        })
+                      ) : (
+                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                          등록된 설문 문항이 없습니다.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+
+                {responseManageTab === "responses" ? (
+                  <section>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-bold text-gray-950">응답 목록</h3>
+                    <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">
+                      응답 {responseManageEventResponses.length}개
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {responseManageEventResponses.length > 0 ? (
+                      responseManageEventResponses.map((response) => {
+                        const assignedTeam = getEventResponseTeam(responseManageEvent, response);
+
+                        return (
+                          <section
+                            className="rounded-lg border border-gray-200 bg-white p-3"
+                            key={response.id}
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-gray-950">
+                                  {response.participantName}
+                                </p>
+                                <p className="mt-1 text-xs font-semibold text-gray-500">
+                                  {new Date(response.submittedAt).toLocaleString("ko-KR")}
+                                </p>
+                              </div>
+                              <span
+                                className={cn(
+                                  "rounded-full px-2.5 py-1 text-xs font-bold",
+                                  responseManageEvent.requiresTeamAssignment
+                                    ? assignedTeam
+                                      ? "bg-brand-50 text-brand-700"
+                                      : "bg-yellow-100 text-yellow-800"
+                                    : "bg-gray-100 text-gray-600",
+                                )}
+                              >
+                                {getTeamAssignmentLabel(responseManageEvent, response)}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
+                              {Object.entries(response.answers).length > 0 ? (
+                                Object.entries(response.answers).map(([questionId, answer]) => {
+                                  const question = responseManageEvent.survey.find(
+                                    (item) => item.id === questionId,
+                                  );
+
+                                  return (
+                                    <p key={questionId}>
+                                      <span className="font-semibold text-gray-950">
+                                        {question?.label ?? questionId}:
+                                      </span>{" "}
+                                      {formatAnswerValue(answer)}
+                                    </p>
+                                  );
+                                })
+                              ) : (
+                                <p className="text-gray-500">저장된 답변이 없습니다.</p>
+                              )}
+                            </div>
+
+                            {responseManageEvent.requiresTeamAssignment ? (
+                              <label className="mt-3 block">
+                                <span className={labelClass}>조 선택</span>
+                                <select
+                                  className={fieldClass}
+                                  onChange={(selectEvent) =>
+                                    assignEventResponseTeam(
+                                      selectedGuide.id,
+                                      responseManageEvent.id,
+                                      response.participantName,
+                                      selectEvent.target.value || undefined,
+                                    )
+                                  }
+                                  value={assignedTeam?.id ?? ""}
+                                >
+                                  <option value="">미배정</option>
+                                  {responseManageEvent.teams.map((team) => (
+                                    <option key={team.id} value={team.id}>
+                                      {team.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+                          </section>
+                        );
+                      })
+                    ) : (
+                      <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500 lg:col-span-2">
+                        이 이벤트에 저장된 응답이 없습니다.
+                      </p>
+                    )}
+                  </div>
+                </section>
+                ) : null}
+
+                {responseManageEvent.requiresTeamAssignment && responseManageTab === "teams" ? (
+                  <section className="border-t border-gray-100 pt-4">
+                    <h3 className="font-bold text-gray-950">조 배치 관리</h3>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      <input
+                        className={compactFieldClass}
+                        onChange={(inputEvent) =>
+                          setGroupDrafts({
+                            ...groupDrafts,
+                            [responseManageEvent.id]: {
+                              ...groupDraft,
+                              teamName: inputEvent.target.value,
+                            },
+                          })
+                        }
+                        placeholder="조 이름"
+                        value={groupDraft.teamName}
+                      />
+                      <input
+                        className={compactFieldClass}
+                        onChange={(inputEvent) =>
+                          setGroupDrafts({
+                            ...groupDrafts,
+                            [responseManageEvent.id]: {
+                              ...groupDraft,
+                              memo: inputEvent.target.value,
+                            },
+                          })
+                        }
+                        placeholder="메모"
+                        value={groupDraft.memo}
+                      />
+                      <input
+                        className={compactFieldClass}
+                        onChange={(inputEvent) =>
+                          setGroupDrafts({
+                            ...groupDrafts,
+                            [responseManageEvent.id]: {
+                              ...groupDraft,
+                              membersText: inputEvent.target.value,
+                            },
+                          })
+                        }
+                        placeholder="참가자명을 쉼표로 구분"
+                        value={groupDraft.membersText}
+                      />
+                      <Button
+                        onClick={() => {
+                          if (!groupDraft.teamName.trim()) {
+                            return;
+                          }
+
+                          addEventTeam(selectedGuide.id, responseManageEvent.id, {
+                            id: createId("team"),
+                            eventId: responseManageEvent.id,
+                            name: groupDraft.teamName.trim(),
+                            members: groupDraft.membersText
+                              .split(",")
+                              .map((member) => member.trim())
+                              .filter(Boolean),
+                            memo: groupDraft.memo.trim(),
+                          });
+                          setGroupDrafts({
+                            ...groupDrafts,
+                            [responseManageEvent.id]: {
+                              teamName: "",
+                              membersText: "",
+                              memo: "",
+                            },
+                          });
+                        }}
+                        variant="secondary"
+                      >
+                        조 추가
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 space-y-2">
+                      {responseManageEvent.teams.length > 0 ? (
+                        responseManageEvent.teams.map((team) => (
+                          <section
+                            className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                            key={team.id}
+                          >
+                            <div className="grid gap-2 md:grid-cols-2">
+                              <label>
+                                <span className={labelClass}>조 이름</span>
+                                <input
+                                  className={fieldClass}
+                                  onChange={(inputEvent) =>
+                                    updateEventTeam(
+                                      selectedGuide.id,
+                                      responseManageEvent.id,
+                                      team.id,
+                                      { name: inputEvent.target.value },
+                                    )
+                                  }
+                                  value={team.name}
+                                />
+                              </label>
+                              <label>
+                                <span className={labelClass}>메모</span>
+                                <input
+                                  className={fieldClass}
+                                  onChange={(inputEvent) =>
+                                    updateEventTeam(
+                                      selectedGuide.id,
+                                      responseManageEvent.id,
+                                      team.id,
+                                      { memo: inputEvent.target.value },
+                                    )
+                                  }
+                                  value={team.memo ?? ""}
+                                />
+                              </label>
+                              <label className="md:col-span-2">
+                                <span className={labelClass}>참가자</span>
+                                <input
+                                  className={fieldClass}
+                                  onChange={(inputEvent) =>
+                                    updateEventTeam(
+                                      selectedGuide.id,
+                                      responseManageEvent.id,
+                                      team.id,
+                                      {
+                                        members: inputEvent.target.value
+                                          .split(",")
+                                          .map((member) => member.trim())
+                                          .filter(Boolean),
+                                      },
+                                    )
+                                  }
+                                  value={team.members.join(", ")}
+                                />
+                              </label>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <Button
+                                icon={<Trash2 className="h-4 w-4" />}
+                                onClick={() =>
+                                  deleteEventTeam(selectedGuide.id, responseManageEvent.id, team.id)
+                                }
+                                variant="danger"
+                              >
+                                삭제
+                              </Button>
+                            </div>
+                          </section>
+                        ))
+                      ) : (
+                        <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                          생성된 조가 없습니다.
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            );
+          })()}
+        </AdminModal>
       ) : null}
 
     </section>
