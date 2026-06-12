@@ -144,6 +144,7 @@ const normalizeMapLocation = (location: MapLocation, index: number): MapLocation
   const normalizedLocation = {
     id: location.id || `location-${index + 1}`,
     name: location.name || "장소",
+    description: location.description ?? "",
     category: location.category,
     xPercent: Number.isFinite(location.xPercent) ? location.xPercent : 50,
     yPercent: Number.isFinite(location.yPercent) ? location.yPercent : 50,

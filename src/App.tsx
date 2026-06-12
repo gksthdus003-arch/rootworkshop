@@ -13,7 +13,7 @@ import type { BottomTabId } from "./types/workshop";
 
 type AppView = "participant" | "preGuide" | "admin";
 
-const ParticipantView = () => {
+const ParticipantView = ({ onPreGuideClick }: { onPreGuideClick: () => void }) => {
   const { activeTab } = useWorkshopStore();
 
   if (activeTab === "schedule") {
@@ -28,7 +28,7 @@ const ParticipantView = () => {
     return <RecommendationsPage />;
   }
 
-  return <MapPage />;
+  return <MapPage onPreGuideClick={onPreGuideClick} />;
 };
 
 const WorkshopApp = () => {
@@ -77,7 +77,7 @@ const WorkshopApp = () => {
             }}
           />
         ) : (
-          <ParticipantView />
+          <ParticipantView onPreGuideClick={openPreGuide} />
         )}
       </AppShell>
       <NameEntryDialog />

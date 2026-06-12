@@ -3,10 +3,13 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Check,
   Lock,
   LogOut,
+  Pencil,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { Button } from "../../components/common/Button";
 import { Card } from "../../components/common/Card";
@@ -23,6 +26,7 @@ import type {
   EventItem,
   EventStatus,
   MapLocationCategory,
+  MapLocation,
   RecommendationItem,
   ScheduleCategory,
   ScheduleItem,
@@ -333,12 +337,14 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   });
   const [locationDraft, setLocationDraft] = useState({
     name: "",
+    description: "",
     category: "other" as MapLocationCategory,
     xPercent: "50",
     yPercent: "50",
     isWorkshopLocation: true,
     isSmokingArea: false,
   });
+  const [editingLocationId, setEditingLocationId] = useState<string>();
   const [scheduleDraft, setScheduleDraft] = useState({
     title: "",
     description: "",
@@ -423,6 +429,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     addMapLocation(selectedGuide.id, {
       id: createId("location"),
       name: locationDraft.name.trim(),
+      description: locationDraft.description.trim(),
       category: locationDraft.category,
       xPercent: Number(locationDraft.xPercent) || 50,
       yPercent: Number(locationDraft.yPercent) || 50,
@@ -431,12 +438,36 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     });
     setLocationDraft({
       name: "",
+      description: "",
       category: "other",
       xPercent: "50",
       yPercent: "50",
       isWorkshopLocation: true,
       isSmokingArea: false,
     });
+  };
+
+  const getLocationScheduleUsage = (locationId: string) =>
+    selectedGuide.schedule.filter((scheduleItem) => scheduleItem.locationId === locationId);
+
+  const handleDeleteMapLocation = (location: MapLocation) => {
+    const usedScheduleItems = getLocationScheduleUsage(location.id);
+
+    if (usedScheduleItems.length > 0) {
+      window.alert(
+        `이 장소는 일정에서 사용 중입니다: ${usedScheduleItems
+          .map((scheduleItem) => scheduleItem.title)
+          .join(", ")}`,
+      );
+      return;
+    }
+
+    if (!window.confirm("이 장소를 삭제하시겠습니까?")) {
+      return;
+    }
+
+    deleteMapLocation(selectedGuide.id, location.id);
+    setEditingLocationId((currentId) => (currentId === location.id ? undefined : currentId));
   };
 
   const handleAddScheduleItem = (event: FormEvent<HTMLFormElement>) => {
@@ -1011,7 +1042,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
               <h2 className="font-bold">장소 관리</h2>
             </div>
             <form
-              className="grid gap-3 border-b border-gray-100 bg-gray-50/70 p-4 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_5rem_5rem_auto_auto]"
+              className="grid gap-3 border-b border-gray-100 bg-gray-50/70 p-4 md:grid-cols-2"
               onSubmit={handleAddMapLocation}
             >
               <label>
@@ -1044,69 +1075,129 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   ))}
                 </select>
               </label>
-              <label>
-                <span className={labelClass}>X</span>
+              <label className="md:col-span-2">
+                <span className={labelClass}>설명</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
-                    setLocationDraft({ ...locationDraft, xPercent: event.target.value })
+                    setLocationDraft({ ...locationDraft, description: event.target.value })
                   }
-                  type="number"
-                  value={locationDraft.xPercent}
+                  placeholder="운영 메모 또는 장소 설명"
+                  value={locationDraft.description}
                 />
               </label>
-              <label>
-                <span className={labelClass}>Y</span>
-                <input
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setLocationDraft({ ...locationDraft, yPercent: event.target.value })
-                  }
-                  type="number"
-                  value={locationDraft.yPercent}
-                />
-              </label>
-              <label className="flex items-center gap-2 pt-7 text-sm font-semibold text-gray-700">
-                <input
-                  checked={locationDraft.isWorkshopLocation}
-                  onChange={(event) =>
-                    setLocationDraft({
-                      ...locationDraft,
-                      isWorkshopLocation: event.target.checked,
-                    })
-                  }
-                  type="checkbox"
-                />
-                워크숍
-              </label>
-              <div className="flex items-end">
-                <Button disabled={!locationDraft.name.trim()} type="submit">
+              <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-200">
+                  <input
+                    checked={locationDraft.isWorkshopLocation}
+                    onChange={(event) =>
+                      setLocationDraft({
+                        ...locationDraft,
+                        isWorkshopLocation: event.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                  워크숍 사용 장소
+                </label>
+                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700 ring-1 ring-gray-200">
+                  <input
+                    checked={locationDraft.isSmokingArea}
+                    onChange={(event) =>
+                      setLocationDraft({
+                        ...locationDraft,
+                        isSmokingArea: event.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                  흡연구역
+                </label>
+                <Button className="ml-auto" disabled={!locationDraft.name.trim()} type="submit">
                   추가
                 </Button>
               </div>
             </form>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[64rem] text-left text-sm">
-                <thead className="bg-gray-50 text-gray-500">
-                  <tr>
-                    <th className="px-4 py-3">장소명</th>
-                    <th className="px-4 py-3">카테고리</th>
-                    <th className="px-4 py-3">X</th>
-                    <th className="px-4 py-3">Y</th>
-                    <th className="px-4 py-3">워크숍 사용</th>
-                    <th className="px-4 py-3">흡연구역</th>
-                    <th className="px-4 py-3">동작</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedGuide.map.locations.map((location) => {
-                    const CategoryIcon = getMapLocationCategoryIcon(location.category);
+            <div className="grid gap-3 p-4 md:grid-cols-2">
+              {selectedGuide.map.locations.map((location) => {
+                const CategoryIcon = getMapLocationCategoryIcon(location.category);
+                const isEditing = editingLocationId === location.id;
+                const usedScheduleItems = getLocationScheduleUsage(location.id);
 
-                    return (
-                      <tr className="border-t border-gray-100" key={location.id}>
-                        <td className="px-4 py-3">
+                return (
+                  <article className="rounded-lg border border-gray-200 bg-white p-4" key={location.id}>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <CategoryIcon className="h-4 w-4 shrink-0 text-brand-700" />
+                          <h3 className="truncate font-bold text-gray-950">{location.name}</h3>
+                        </div>
+                        <p className="mt-1 text-xs font-semibold text-gray-500">
+                          {mapLocationCategoryLabels[location.category]} · X {location.xPercent}, Y {location.yPercent}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          aria-label={isEditing ? "수정 닫기" : "수정"}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100"
+                          onClick={() =>
+                            setEditingLocationId(isEditing ? undefined : location.id)
+                          }
+                          type="button"
+                        >
+                          {isEditing ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                        </button>
+                        <button
+                          aria-label="삭제"
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-red-600 hover:bg-red-50"
+                          onClick={() => handleDeleteMapLocation(location)}
+                          type="button"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {location.description ? (
+                      <p className="mt-2 line-clamp-2 text-sm leading-5 text-gray-600">
+                        {location.description}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-bold",
+                          location.isWorkshopLocation
+                            ? "bg-brand-50 text-brand-800"
+                            : "bg-gray-100 text-gray-500",
+                        )}
+                      >
+                        {location.isWorkshopLocation ? "워크숍 사용" : "전체만 표시"}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-1 text-xs font-bold",
+                          location.isSmokingArea
+                            ? "bg-gray-900 text-white"
+                            : "bg-gray-100 text-gray-500",
+                        )}
+                      >
+                        {location.isSmokingArea ? "흡연구역" : "일반 장소"}
+                      </span>
+                      {usedScheduleItems.length > 0 ? (
+                        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700">
+                          일정 사용 중
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {isEditing ? (
+                      <div className="mt-4 grid gap-3 border-t border-gray-100 pt-4">
+                        <label>
+                          <span className={labelClass}>장소명</span>
                           <input
-                            className={compactFieldClass}
+                            className={fieldClass}
                             onChange={(event) =>
                               updateMapLocation(selectedGuide.id, location.id, {
                                 name: event.target.value,
@@ -1114,88 +1205,77 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             }
                             value={location.name}
                           />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <CategoryIcon className="h-4 w-4 shrink-0 text-brand-700" />
-                            <select
-                              className={compactFieldClass}
+                        </label>
+                        <label>
+                          <span className={labelClass}>카테고리</span>
+                          <select
+                            className={fieldClass}
+                            onChange={(event) =>
+                              updateMapLocation(selectedGuide.id, location.id, {
+                                category: event.target.value as MapLocationCategory,
+                              })
+                            }
+                            value={location.category}
+                          >
+                            {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          <span className={labelClass}>설명</span>
+                          <input
+                            className={fieldClass}
+                            onChange={(event) =>
+                              updateMapLocation(selectedGuide.id, location.id, {
+                                description: event.target.value,
+                              })
+                            }
+                            value={location.description ?? ""}
+                          />
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                            <input
+                              checked={location.isWorkshopLocation}
                               onChange={(event) =>
                                 updateMapLocation(selectedGuide.id, location.id, {
-                                  category: event.target.value as MapLocationCategory,
+                                  isWorkshopLocation: event.target.checked,
                                 })
                               }
-                              value={location.category}
-                            >
-                              {Object.entries(mapLocationCategoryLabels).map(([value, label]) => (
-                                <option key={value} value={value}>
-                                  {label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            className={compactFieldClass}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                xPercent: Number(event.target.value),
-                              })
-                            }
-                            type="number"
-                            value={location.xPercent}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            className={compactFieldClass}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                yPercent: Number(event.target.value),
-                              })
-                            }
-                            type="number"
-                            value={location.yPercent}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            checked={location.isWorkshopLocation}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                isWorkshopLocation: event.target.checked,
-                              })
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            checked={location.isSmokingArea}
-                            onChange={(event) =>
-                              updateMapLocation(selectedGuide.id, location.id, {
-                                isSmokingArea: event.target.checked,
-                              })
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
+                              type="checkbox"
+                            />
+                            워크숍 사용 장소
+                          </label>
+                          <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-gray-100 px-3 text-sm font-semibold text-gray-700">
+                            <input
+                              checked={location.isSmokingArea}
+                              onChange={(event) =>
+                                updateMapLocation(selectedGuide.id, location.id, {
+                                  isSmokingArea: event.target.checked,
+                                })
+                              }
+                              type="checkbox"
+                            />
+                            흡연구역
+                          </label>
                           <Button
-                            icon={<Trash2 className="h-4 w-4" />}
-                            onClick={() => deleteMapLocation(selectedGuide.id, location.id)}
+                            className="ml-auto"
+                            icon={<Check className="h-4 w-4" />}
+                            onClick={() => setEditingLocationId(undefined)}
                             type="button"
-                            variant="danger"
+                            variant="secondary"
                           >
-                            삭제
+                            완료
                           </Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
             </div>
           </div>
         </div>

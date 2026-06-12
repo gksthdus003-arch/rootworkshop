@@ -48,6 +48,7 @@ export interface ScheduleControlConfig {
 export interface MapLocation {
   id: string;
   name: string;
+  description?: string;
   category: MapLocationCategory;
   xPercent: number;
   yPercent: number;

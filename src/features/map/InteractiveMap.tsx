@@ -1,7 +1,11 @@
 import {
+  ArrowRight,
+  Cigarette,
+  MapPin,
   Minus,
   Plus,
   RotateCcw,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -14,7 +18,7 @@ import {
 } from "react";
 import { cn } from "../../lib/cn";
 import { getMapLocationCategoryIcon } from "../../lib/mapLocationCategories";
-import type { MapLocation } from "../../types/workshop";
+import type { MapLocation, ScheduleItem, WorkshopStatus } from "../../types/workshop";
 
 type ViewMode = "featured" | "all";
 
@@ -50,6 +54,9 @@ interface InteractiveMapProps {
   imageUrl?: string;
   fallbackImageUrl?: string;
   locations: MapLocation[];
+  guideStatus?: WorkshopStatus;
+  schedule?: ScheduleItem[];
+  onPreGuideClick?: () => void;
   isLocationEditingEnabled?: boolean;
   onLocationPositionChange?: (locationId: string, position: { xPercent: number; yPercent: number }) => void;
 }
@@ -74,11 +81,20 @@ const areTransformsEqual = (first: TransformState, second: TransformState) =>
 
 const roundPercent = (value: number) => Math.round(value * 10) / 10;
 
+const getScheduleTime = (value: string) => {
+  const time = new Date(value).getTime();
+
+  return Number.isNaN(time) ? undefined : time;
+};
+
 export const InteractiveMap = ({
   title,
   imageUrl,
   fallbackImageUrl,
   locations,
+  guideStatus,
+  schedule,
+  onPreGuideClick,
   isLocationEditingEnabled = false,
   onLocationPositionChange,
 }: InteractiveMapProps) => {
@@ -89,6 +105,11 @@ export const InteractiveMap = ({
   const draggedLocationIdRef = useRef<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [viewMode, setViewMode] = useState<ViewMode>("featured");
+  const [showSmokingAreas, setShowSmokingAreas] = useState(true);
+  const [selectedLocationId, setSelectedLocationId] = useState<string>();
+  const [noticeMessage, setNoticeMessage] = useState("");
+  const [showPreGuideAction, setShowPreGuideAction] = useState(false);
+  const [isControlMenuOpen, setIsControlMenuOpen] = useState(false);
   const [transform, setTransform] = useState<TransformState>(INITIAL_TRANSFORM);
   const [currentImageUrl, setCurrentImageUrl] = useState(imageUrl ?? fallbackImageUrl);
   const [hasImageError, setHasImageError] = useState(false);
@@ -127,12 +148,31 @@ export const InteractiveMap = ({
   };
 
   const visibleLocations = useMemo(
-    () =>
-      viewMode === "featured"
-        ? locations.filter((location) => location.isWorkshopLocation)
-        : locations,
-    [locations, viewMode],
+    () => {
+      const baseLocations =
+        viewMode === "featured"
+          ? locations.filter((location) => location.isWorkshopLocation)
+          : locations;
+
+      if (showSmokingAreas) {
+        const smokingLocations = locations.filter((location) => location.isSmokingArea);
+        const visibleIds = new Set(baseLocations.map((location) => location.id));
+
+        return [
+          ...baseLocations,
+          ...smokingLocations.filter((location) => !visibleIds.has(location.id)),
+        ];
+      }
+
+      return baseLocations.filter((location) => !location.isSmokingArea);
+    },
+    [locations, showSmokingAreas, viewMode],
   );
+  const visibleLocationIds = useMemo(
+    () => new Set(visibleLocations.map((location) => location.id)),
+    [visibleLocations],
+  );
+  const canMoveToScheduleLocation = Boolean(guideStatus && schedule);
 
   useLayoutEffect(() => {
     if (!viewportRef.current) {
@@ -190,6 +230,96 @@ export const InteractiveMap = ({
 
   const resetTransform = () => {
     applyTransform(INITIAL_TRANSFORM);
+  };
+
+  const moveToLocation = (location: MapLocation) => {
+    const nextScale = Math.max(transformRef.current.scale, 1.8);
+    const x = ((50 - location.xPercent) / 100) * mapSize * nextScale;
+    const y = ((50 - location.yPercent) / 100) * mapSize * nextScale;
+
+    setSelectedLocationId(location.id);
+    applyTransform({
+      scale: nextScale,
+      x,
+      y,
+    });
+  };
+
+  const findScheduleLocationTarget = () => {
+    if (guideStatus === "pre") {
+      return {
+        message: "워크숍 시작 전입니다. 사전안내를 확인해주세요.",
+        showPreGuideAction: Boolean(onPreGuideClick),
+      };
+    }
+
+    if (guideStatus === "closed") {
+      return { message: "종료된 워크숍입니다." };
+    }
+
+    if (guideStatus !== "live" || !schedule?.length) {
+      return { message: "표시할 일정 장소가 없습니다." };
+    }
+
+    const now = Date.now();
+    const scheduleWithTime = schedule
+      .map((scheduleItem) => ({
+        scheduleItem,
+        startTime: getScheduleTime(scheduleItem.startAt),
+        endTime: getScheduleTime(scheduleItem.endAt),
+      }))
+      .filter(
+        (item): item is {
+          scheduleItem: ScheduleItem;
+          startTime: number;
+          endTime: number;
+        } => item.startTime !== undefined && item.endTime !== undefined,
+      );
+    const currentSchedule = scheduleWithTime
+      .filter((item) => item.startTime <= now && now < item.endTime)
+      .sort((first, second) => first.startTime - second.startTime)[0];
+    const nextSchedule = scheduleWithTime
+      .filter((item) => now < item.startTime)
+      .sort((first, second) => first.startTime - second.startTime)[0];
+    const target = currentSchedule ?? nextSchedule;
+
+    if (!target) {
+      return { message: "표시할 일정 장소가 없습니다." };
+    }
+
+    if (!target.scheduleItem.locationId) {
+      return { message: "해당 일정에 연결된 지도 장소가 없습니다." };
+    }
+
+    const location = locations.find((item) => item.id === target.scheduleItem.locationId);
+
+    if (!location) {
+      return { message: "해당 일정에 연결된 지도 장소가 없습니다." };
+    }
+
+    if (!visibleLocationIds.has(location.id)) {
+      return {
+        message: "해당 일정 장소가 현재 지도 필터에서 보이지 않습니다.",
+      };
+    }
+
+    return {
+      location,
+      message: currentSchedule
+        ? `${target.scheduleItem.title} 장소를 표시합니다.`
+        : "현재 진행 중인 일정이 없어 다음 일정 장소를 표시합니다.",
+    };
+  };
+
+  const handleMoveToCurrentLocation = () => {
+    const target = findScheduleLocationTarget();
+
+    setNoticeMessage(target.message);
+    setShowPreGuideAction(Boolean(target.showPreGuideAction));
+
+    if (target.location) {
+      moveToLocation(target.location);
+    }
   };
 
   const updateScale = (scaleDelta: number) => {
@@ -458,7 +588,7 @@ export const InteractiveMap = ({
               style={{
                 left: `${location.xPercent}%`,
                 top: `${location.yPercent}%`,
-                zIndex: location.isWorkshopLocation ? 20 : 10,
+                zIndex: selectedLocationId === location.id ? 30 : location.isWorkshopLocation ? 20 : 10,
               }}
             >
               <div
@@ -471,7 +601,9 @@ export const InteractiveMap = ({
                 <span
                   className={cn(
                     "max-w-28 truncate rounded-full px-2 py-0.5 font-bold shadow-soft",
-                    location.isSmokingArea
+                    selectedLocationId === location.id
+                      ? "bg-brand-900 text-[10px] text-white ring-2 ring-white"
+                      : location.isSmokingArea
                       ? "bg-gray-900 text-[10px] text-white"
                       : "bg-white text-[10px] text-brand-900",
                   )}
@@ -481,7 +613,9 @@ export const InteractiveMap = ({
                 <span
                   className={cn(
                     "flex items-center justify-center rounded-full border-2 shadow-soft",
-                    location.isSmokingArea
+                    selectedLocationId === location.id
+                      ? "h-7 w-7 border-white bg-brand-900 text-white ring-2 ring-brand-200"
+                      : location.isSmokingArea
                       ? "h-6 w-6 border-white bg-gray-900 text-white"
                       : "h-6 w-6 border-white bg-brand-700 text-white",
                   )}
@@ -525,6 +659,69 @@ export const InteractiveMap = ({
       </div>
 
       <div
+        className="absolute bottom-3 left-3 z-20 flex flex-col gap-1.5 sm:bottom-6"
+        onPointerDown={(event) => event.stopPropagation()}
+        onWheel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <button
+          aria-expanded={isControlMenuOpen}
+          className="inline-flex min-h-8 w-fit items-center gap-1.5 rounded-full bg-white/90 px-2.5 text-xs font-bold text-brand-900 shadow-soft backdrop-blur hover:bg-white"
+          onClick={() => setIsControlMenuOpen((isOpen) => !isOpen)}
+          type="button"
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          옵션
+        </button>
+
+        {isControlMenuOpen ? (
+          <div className="grid w-26 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
+            {canMoveToScheduleLocation ? (
+              <button
+                className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-brand-700 px-1 text-white hover:bg-brand-800"
+                onClick={handleMoveToCurrentLocation}
+                type="button"
+              >
+                <MapPin className="h-3 w-3 justify-self-center" />
+                <span className="truncate text-left">현재 장소</span>
+                <ArrowRight className="h-3 w-3 justify-self-center" />
+              </button>
+            ) : null}
+            <label className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-white/70 px-1 text-gray-700 ring-1 ring-gray-200">
+              <Cigarette className="h-3 w-3 justify-self-center" />
+              <span className="truncate text-left">흡연구역</span>
+              <input
+                checked={showSmokingAreas}
+                className="h-3.5 w-3.5 justify-self-center accent-gray-900"
+                onChange={(event) => setShowSmokingAreas(event.target.checked)}
+                type="checkbox"
+              />
+            </label>
+          </div>
+        ) : null}
+      </div>
+
+      {noticeMessage ? (
+        <div
+          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <span>{noticeMessage}</span>
+          {showPreGuideAction && onPreGuideClick ? (
+            <button
+              className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
+              onClick={onPreGuideClick}
+              type="button"
+            >
+              사전안내 보러가기
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div
         className="absolute right-3 top-3 z-20 flex flex-col gap-2"
         onPointerDown={(event) => event.stopPropagation()}
         onWheel={(event) => {
@@ -534,27 +731,27 @@ export const InteractiveMap = ({
       >
         <button
           aria-label="확대"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
           onClick={() => updateScale(0.25)}
           type="button"
         >
-          <Plus className="h-5 w-5" />
+          <Plus className="h-4 w-4" />
         </button>
         <button
           aria-label="축소"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
           onClick={() => updateScale(-0.25)}
           type="button"
         >
-          <Minus className="h-5 w-5" />
+          <Minus className="h-4 w-4" />
         </button>
         <button
           aria-label="지도 위치 초기화"
-          className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
+          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/95 text-brand-900 shadow-soft backdrop-blur hover:bg-brand-50"
           onClick={resetTransform}
           type="button"
         >
-          <RotateCcw className="h-5 w-5" />
+          <RotateCcw className="h-4 w-4" />
         </button>
       </div>
 

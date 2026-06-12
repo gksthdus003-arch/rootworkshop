@@ -494,9 +494,9 @@ export const EventsPage = () => {
 
             return (
               <Card key={event.id}>
-                <div className="flex items-start gap-3">
-                  <div className="rounded-full bg-brand-50 p-2 text-brand-700">
-                    <PartyPopper className="h-5 w-5" />
+                <div className="flex items-start gap-2">
+                  <div className="rounded-full bg-brand-50 p-1.5 text-brand-700">
+                    <PartyPopper className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -514,8 +514,8 @@ export const EventsPage = () => {
                         </span>
                       ) : null}
                     </div>
-                    <h2 className="mt-2 text-lg font-bold text-gray-950">{event.title}</h2>
-                    <p className="mt-1 text-sm leading-6 text-gray-600">{event.description}</p>
+                    <h2 className="mt-2 text-base font-bold text-gray-950">{event.title}</h2>
+                    <p className="mt-1 text-sm leading-5 text-gray-600">{event.description}</p>
 
                     {hasSubmitted ? (
                       <p className="mt-2 flex items-center gap-1 text-xs font-bold text-brand-700">
@@ -524,30 +524,28 @@ export const EventsPage = () => {
                       </p>
                     ) : null}
                   </div>
-
-                  <div className="shrink-0">
-                    <Button
-                      disabled={event.status === "waiting"}
-                      icon={
-                        event.status === "closed" ? (
-                          <ClipboardList className="h-4 w-4" />
-                        ) : undefined
-                      }
-                      onClick={() => {
-                        if (event.status === "active") {
-                          setSurveyEventId(event.id);
-                        }
-
-                        if (event.status === "closed") {
-                          setResultEventId(event.id);
-                        }
-                      }}
-                      variant={event.status === "active" ? "primary" : "secondary"}
-                    >
-                      {buttonLabel}
-                    </Button>
-                  </div>
                 </div>
+                <Button
+                  className="mt-3 min-h-9 w-full py-1.5"
+                  disabled={event.status === "waiting"}
+                  icon={
+                    event.status === "closed" ? (
+                      <ClipboardList className="h-4 w-4" />
+                    ) : undefined
+                  }
+                  onClick={() => {
+                    if (event.status === "active") {
+                      setSurveyEventId(event.id);
+                    }
+
+                    if (event.status === "closed") {
+                      setResultEventId(event.id);
+                    }
+                  }}
+                  variant={event.status === "active" ? "primary" : "secondary"}
+                >
+                  {buttonLabel}
+                </Button>
               </Card>
             );
           })
