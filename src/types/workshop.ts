@@ -14,6 +14,10 @@ export type ScheduleCategory =
   | "notice";
 
 export type EventStatus = "active" | "waiting" | "closed";
+export type EventType = "survey" | "event";
+export type SurveyKind = "general" | "activity" | "transport" | "bowlingLevel";
+export type EventKind = "general" | "bowling" | "preGuide";
+export type EventPhase = "preSurvey" | "scoreInput" | "result";
 export type SurveyQuestionType = "description" | "singleChoice" | "multipleChoice" | "shortText";
 export type MapLocationCategory =
   | "meal"
@@ -24,6 +28,7 @@ export type MapLocationCategory =
   | "other";
 
 export interface ParticipantProfile {
+  id?: string;
   name: string;
   createdAt: string;
 }
@@ -67,6 +72,15 @@ export interface EventItem {
   workshopId?: WorkshopGuideId;
   title: string;
   description: string;
+  type?: EventType;
+  surveyKind?: SurveyKind;
+  eventKind?: EventKind;
+  showInEventList?: boolean;
+  linkedSurveyId?: string;
+  phase?: EventPhase;
+  pageBackgroundImage?: string;
+  themeImage?: string;
+  pageLayoutType?: string;
   status: EventStatus;
   opensAt: string;
   closesAt: string;
@@ -121,6 +135,7 @@ export interface EventSurveyResponse {
   id: string;
   guideId: WorkshopGuideId;
   eventId: string;
+  participantId?: string;
   participantName: string;
   submittedAt: string;
   assignedTeamId?: string;

@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 @layer base {
+  @font-face {
+    font-family: "Cafe24ProUp";
+    font-display: swap;
+    src: local("Cafe24 ProUp"), local("Cafe24ProUp");
+  }
+
   :root {
     color: #111827;
     background: #fbfaf7;
@@ -71,6 +77,15 @@
 
   .pre-guide-kakao-map .wrap_controllers {
     display: none !important;
+  }
+
+  .font-cafe24-pro-up {
+    font-family:
+      "Cafe24ProUp",
+      Pretendard,
+      ui-sans-serif,
+      system-ui,
+      sans-serif;
   }
 }
 

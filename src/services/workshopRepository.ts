@@ -4,13 +4,17 @@ import { readFromStorage, storageKeys, writeToStorage } from "../lib/storage";
 import type {
   AnnouncementItem,
   EventItem,
+  EventKind,
+  EventPhase,
   EventStatus,
+  EventType,
   EventTeam,
   EventSurveyResponse,
   MapLocation,
   ParticipantProfile,
   PosterConfig,
   RecommendationItem,
+  SurveyKind,
   SurveyQuestion,
   WorkshopGuide,
   WorkshopStatus,
@@ -45,7 +49,100 @@ const createId = (prefix: string) => {
 };
 
 const validEventStatuses: EventStatus[] = ["waiting", "active", "closed"];
+const validSurveyKinds: SurveyKind[] = ["general", "activity", "transport", "bowlingLevel"];
+const validEventKinds: EventKind[] = ["general", "bowling", "preGuide"];
+const validEventPhases: EventPhase[] = ["preSurvey", "scoreInput", "result"];
 const validWorkshopStatuses: WorkshopStatus[] = ["pre", "live", "closed"];
+
+const inferEventType = (event: EventItem): EventType => {
+  const rawType = (event as { type?: unknown }).type;
+  const legacyType = typeof rawType === "string" ? rawType : undefined;
+  const searchableText = `${event.id} ${event.title}`.toLowerCase();
+
+  if (legacyType === "survey" || legacyType === "event") {
+    return legacyType;
+  }
+
+  if (legacyType === "activity") {
+    return "survey";
+  }
+
+  if (legacyType === "bowling") {
+    return searchableText.includes("level") || searchableText.includes("레벨 테스트")
+      ? "survey"
+      : "event";
+  }
+
+  if (searchableText.includes("대회") || searchableText.includes("game-board")) {
+    return "event";
+  }
+
+  return "survey";
+};
+
+const inferSurveyKind = (event: EventItem, type: EventType): SurveyKind | undefined => {
+  if (event.surveyKind && validSurveyKinds.includes(event.surveyKind)) {
+    return event.surveyKind;
+  }
+
+  if (type !== "survey") {
+    return undefined;
+  }
+
+  const rawType = (event as { type?: unknown }).type;
+  const legacyType = typeof rawType === "string" ? rawType : undefined;
+  const searchableText = `${event.id} ${event.title}`.toLowerCase();
+
+  if (legacyType === "activity" || searchableText.includes("activity") || searchableText.includes("액티비티")) {
+    return "activity";
+  }
+
+  if (legacyType === "bowling" || searchableText.includes("bowling-level") || searchableText.includes("레벨 테스트")) {
+    return "bowlingLevel";
+  }
+
+  return "general";
+};
+
+const inferEventKind = (event: EventItem, type: EventType): EventKind | undefined => {
+  if (event.eventKind && validEventKinds.includes(event.eventKind)) {
+    return event.eventKind;
+  }
+
+  if (type !== "event") {
+    return undefined;
+  }
+
+  const rawType = (event as { type?: unknown }).type;
+  const legacyType = typeof rawType === "string" ? rawType : undefined;
+  const searchableText = `${event.id} ${event.title}`.toLowerCase();
+
+  if (legacyType === "bowling" || searchableText.includes("bowling") || searchableText.includes("볼링")) {
+    return "bowling";
+  }
+
+  if (searchableText.includes("pre-guide") || searchableText.includes("사전")) {
+    return "preGuide";
+  }
+
+  return "general";
+};
+
+const inferEventPhase = (event: EventItem, type: EventType): EventPhase | undefined => {
+  if (event.phase && validEventPhases.includes(event.phase)) {
+    return event.phase;
+  }
+
+  if (type !== "event" || inferEventKind(event, type) !== "bowling") {
+    return undefined;
+  }
+
+  if (event.status === "closed") {
+    return "result";
+  }
+
+  return "preSurvey";
+};
 
 const normalizePoster = (
   poster: PosterConfig | undefined,
@@ -99,12 +196,24 @@ const normalizeEvent = (event: EventItem, index: number, workshopId: string): Ev
   const teams = Array.isArray(event.teams) && event.teams.length > 0
     ? event.teams
     : normalizeLegacyTeams(event);
+  const type = inferEventType(event);
+  const surveyKind = inferSurveyKind(event, type);
+  const eventKind = inferEventKind(event, type);
 
   return {
     id: eventId,
     workshopId: event.workshopId || workshopId,
     title: event.title || "이벤트",
     description: event.description || "",
+    type,
+    surveyKind,
+    eventKind,
+    showInEventList: event.showInEventList ?? (surveyKind === "bowlingLevel" ? false : true),
+    linkedSurveyId: event.linkedSurveyId,
+    phase: inferEventPhase(event, type),
+    pageBackgroundImage: event.pageBackgroundImage,
+    themeImage: event.themeImage,
+    pageLayoutType: event.pageLayoutType,
     status: validEventStatuses.includes(event.status) ? event.status : "waiting",
     opensAt: event.opensAt || new Date().toISOString(),
     closesAt: event.closesAt || new Date().toISOString(),
@@ -113,6 +222,29 @@ const normalizeEvent = (event: EventItem, index: number, workshopId: string): Ev
     resultSummary: event.resultSummary,
     teams: teams.map((team, teamIndex) => normalizeTeam(team, eventId, teamIndex)),
   };
+};
+
+const ensureDefault2026Events = (events: EventItem[], mockDefaultGuide?: WorkshopGuide) => {
+  const hasBowlingEvent = events.some(
+    (event) =>
+      event.id === "bowling-competition" ||
+      (event.type === "event" &&
+        (event.eventKind === "bowling" ||
+          event.title.includes("볼링대회") ||
+          event.title.includes("볼링 대회"))),
+  );
+
+  if (hasBowlingEvent) {
+    return events;
+  }
+
+  const mockBowlingEvent = mockDefaultGuide?.events.find(
+    (event) => event.id === "bowling-competition",
+  );
+
+  return mockBowlingEvent && mockDefaultGuide
+    ? [...events, normalizeEvent(mockBowlingEvent, events.length, mockDefaultGuide.id)]
+    : events;
 };
 
 const normalizeRecommendation = (
@@ -216,9 +348,12 @@ const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => {
           )
         : [],
     },
-    events: Array.isArray(guide.events)
-      ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
-      : [],
+    events: ensureDefault2026Events(
+      Array.isArray(guide.events)
+        ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
+        : [],
+      mockDefaultGuide,
+    ),
     recommendations: Array.isArray(guide.recommendations)
       ? guide.recommendations.map((recommendation, recommendationIndex) =>
           normalizeRecommendation(recommendation, recommendationIndex),
@@ -299,7 +434,9 @@ export const mockWorkshopRepository: WorkshopRepository = {
         !(
           savedResponse.guideId === response.guideId &&
           savedResponse.eventId === response.eventId &&
-          savedResponse.participantName === response.participantName
+          (response.participantId
+            ? savedResponse.participantId === response.participantId
+            : savedResponse.participantName === response.participantName)
         ),
     );
 

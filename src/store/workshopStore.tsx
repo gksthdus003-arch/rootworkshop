@@ -177,6 +177,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
 
     const saveParticipantName = (name: string) => {
       const profile = {
+        id: participantProfile?.id ?? `participant-${Date.now()}`,
         name: name.trim(),
         createdAt: new Date().toISOString(),
       };
@@ -672,7 +673,9 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
             !(
               savedResponse.guideId === response.guideId &&
               savedResponse.eventId === response.eventId &&
-              savedResponse.participantName === response.participantName
+              (response.participantId
+                ? savedResponse.participantId === response.participantId
+                : savedResponse.participantName === response.participantName)
             ),
         );
 

@@ -23,11 +23,15 @@ import {
 import { useWorkshopStore } from "../../store/workshopStore";
 import type {
   EventItem,
+  EventKind,
+  EventPhase,
   EventSurveyResponse,
   EventStatus,
+  EventType,
   MapLocationCategory,
   MapLocation,
   RecommendationItem,
+  SurveyKind,
   ScheduleCategory,
   ScheduleItem,
   SurveyQuestion,
@@ -46,13 +50,8 @@ type AdminSectionId =
   | "events"
   | "recommendations";
 
-type EventTemplateId = "activity" | "bowling";
+type EventTemplateId = "activitySurvey" | "bowlingLevelSurvey" | "bowlingEvent";
 type ResponseManageTab = "summary" | "responses" | "teams";
-
-const eventTemplateRequiresTeamAssignment: Record<EventTemplateId, boolean> = {
-  activity: false,
-  bowling: true,
-};
 
 const adminSections: Array<{
   id: AdminSectionId;
@@ -68,6 +67,35 @@ const eventStatusLabels: Record<EventStatus, string> = {
   waiting: "대기",
   active: "진행중",
   closed: "완료",
+};
+
+const eventTypeLabels: Record<EventType, string> = {
+  survey: "설문형",
+  event: "이벤트형",
+};
+
+const getEventTemplateDefaults = (templateId: EventTemplateId) => {
+  if (templateId === "bowlingEvent") {
+    return {
+      type: "event" as EventType,
+      showInEventList: true,
+      requiresTeamAssignment: true,
+    };
+  }
+
+  if (templateId === "bowlingLevelSurvey") {
+    return {
+      type: "survey" as EventType,
+      showInEventList: false,
+      requiresTeamAssignment: true,
+    };
+  }
+
+  return {
+    type: "survey" as EventType,
+    showInEventList: true,
+    requiresTeamAssignment: true,
+  };
 };
 
 const workshopStatusLabels: Record<WorkshopStatus, string> = {
@@ -172,6 +200,12 @@ type RecommendationEditDraft = {
 type EventEditDraft = {
   id: string;
   title: string;
+  type: EventType;
+  surveyKind: SurveyKind;
+  eventKind: EventKind;
+  showInEventList: boolean;
+  linkedSurveyId: string;
+  phase: EventPhase;
   status: EventStatus;
   description: string;
   opensAt: string;
@@ -288,6 +322,41 @@ const getShortTextResponseSummary = (
     })
     .filter((item) => item.answerText.length > 0);
 
+const getNumericResponseAnswer = (response: EventSurveyResponse, key: string) => {
+  const value = response.answers[key];
+  const textValue = Array.isArray(value) ? value[0] : value;
+  const numberValue = Number(textValue);
+
+  return Number.isFinite(numberValue) && textValue !== "" ? numberValue : undefined;
+};
+
+const getParticipantScoreTotal = (response: EventSurveyResponse) =>
+  (getNumericResponseAnswer(response, "game1Score") ?? 0) +
+  (getNumericResponseAnswer(response, "game2Score") ?? 0);
+
+const getBowlingTeamRankings = (event: EventItem, responses: EventSurveyResponse[]) =>
+  event.teams
+    .map((team) => {
+      const teamResponses = responses.filter(
+        (response) =>
+          response.assignedTeamId === team.id || team.members.includes(response.participantName),
+      );
+
+      return {
+        team,
+        totalScore: teamResponses.reduce(
+          (sum, response) => sum + getParticipantScoreTotal(response),
+          0,
+        ),
+        submittedCount: teamResponses.filter(
+          (response) =>
+            getNumericResponseAnswer(response, "game1Score") !== undefined ||
+            getNumericResponseAnswer(response, "game2Score") !== undefined,
+        ).length,
+      };
+    })
+    .sort((left, right) => right.totalScore - left.totalScore);
+
 const createEventFromTemplate = (
   templateId: EventTemplateId,
   workshopId: string,
@@ -297,12 +366,15 @@ const createEventFromTemplate = (
   const now = new Date();
   const closesAt = new Date(now.getTime() + 60 * 60 * 1000);
 
-  if (templateId === "bowling") {
+  if (templateId === "bowlingLevelSurvey") {
     return {
       id: createId("event"),
       workshopId,
       title: title || "볼링 대회 레벨 테스트",
       description: "공정한 조 편성을 위해 볼링 경험을 확인합니다.",
+      type: "survey",
+      surveyKind: "bowlingLevel",
+      showInEventList: false,
       status,
       opensAt: now.toISOString(),
       closesAt: closesAt.toISOString(),
@@ -321,7 +393,46 @@ const createEventFromTemplate = (
           required: true,
           options: ["초급", "중급", "상급"],
         },
+        {
+          id: createId("question"),
+          type: "singleChoice",
+          label: "최근 1년 내 볼링 경험이 있나요?",
+          required: true,
+          options: ["거의 없음", "가끔 있음", "자주 있음"],
+        },
+        {
+          id: createId("question"),
+          type: "singleChoice",
+          label: "커브 또는 스핀 구사가 가능한가요?",
+          required: true,
+          options: ["아니요", "조금 가능", "가능"],
+        },
+        {
+          id: createId("question"),
+          type: "shortText",
+          label: "이번 볼링 목표 점수를 숫자로 입력해 주세요.",
+          required: true,
+        },
       ],
+      teams: [],
+    };
+  }
+
+  if (templateId === "bowlingEvent") {
+    return {
+      id: createId("event"),
+      workshopId,
+      title: title || "대표님배 볼링대회",
+      description: "목표 점수와 실제 점수로 팀 순위를 확인합니다.",
+      type: "event",
+      eventKind: "bowling",
+      showInEventList: true,
+      phase: "preSurvey",
+      status,
+      opensAt: now.toISOString(),
+      closesAt: closesAt.toISOString(),
+      requiresTeamAssignment: true,
+      survey: [],
       teams: [],
     };
   }
@@ -331,6 +442,9 @@ const createEventFromTemplate = (
     workshopId,
     title: title || "액티비티 사전 설문",
     description: "유료 액티비티 참여 의사와 선호 종목을 확인합니다.",
+    type: "survey",
+    surveyKind: "activity",
+    showInEventList: true,
     status,
     opensAt: now.toISOString(),
     closesAt: closesAt.toISOString(),
@@ -492,9 +606,16 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   const [isScheduleAddModalOpen, setIsScheduleAddModalOpen] = useState(false);
   const [scheduleEditDraft, setScheduleEditDraft] = useState<ScheduleEditDraft | null>(null);
   const [eventTitle, setEventTitle] = useState("");
-  const [eventTemplateId, setEventTemplateId] = useState<EventTemplateId>("activity");
+  const [eventTemplateId, setEventTemplateId] = useState<EventTemplateId>("activitySurvey");
+  const [eventAddType, setEventAddType] = useState<EventType>(
+    getEventTemplateDefaults("activitySurvey").type,
+  );
+  const [eventAddShowInEventList, setEventAddShowInEventList] = useState(
+    getEventTemplateDefaults("activitySurvey").showInEventList,
+  );
+  const [eventAddLinkedSurveyId, setEventAddLinkedSurveyId] = useState("");
   const [eventRequiresTeamAssignment, setEventRequiresTeamAssignment] = useState(
-    eventTemplateRequiresTeamAssignment.activity,
+    getEventTemplateDefaults("activitySurvey").requiresTeamAssignment,
   );
   const [eventStatus, setEventStatus] = useState<EventStatus>("waiting");
   const [isEventAddModalOpen, setIsEventAddModalOpen] = useState(false);
@@ -768,19 +889,35 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
     addEvent(selectedGuide.id, {
       ...nextEvent,
+      type: eventAddType,
+      surveyKind: eventAddType === "survey" ? nextEvent.surveyKind ?? "general" : undefined,
+      eventKind: eventAddType === "event" ? nextEvent.eventKind ?? "general" : undefined,
+      showInEventList: eventAddShowInEventList,
+      linkedSurveyId:
+        eventAddType === "event" && eventAddLinkedSurveyId ? eventAddLinkedSurveyId : undefined,
+      phase:
+        eventAddType === "event" && nextEvent.eventKind === "bowling"
+          ? nextEvent.phase ?? "preSurvey"
+          : undefined,
       requiresTeamAssignment: eventRequiresTeamAssignment,
     });
     setEventTitle("");
-    setEventTemplateId("activity");
-    setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+    setEventTemplateId("activitySurvey");
+    setEventAddType(getEventTemplateDefaults("activitySurvey").type);
+    setEventAddShowInEventList(getEventTemplateDefaults("activitySurvey").showInEventList);
+    setEventAddLinkedSurveyId("");
+    setEventRequiresTeamAssignment(getEventTemplateDefaults("activitySurvey").requiresTeamAssignment);
     setEventStatus("waiting");
     setIsEventAddModalOpen(false);
   };
 
   const openEventAddModal = () => {
     setEventTitle("");
-    setEventTemplateId("activity");
-    setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+    setEventTemplateId("activitySurvey");
+    setEventAddType(getEventTemplateDefaults("activitySurvey").type);
+    setEventAddShowInEventList(getEventTemplateDefaults("activitySurvey").showInEventList);
+    setEventAddLinkedSurveyId("");
+    setEventRequiresTeamAssignment(getEventTemplateDefaults("activitySurvey").requiresTeamAssignment);
     setEventStatus("waiting");
     setIsEventAddModalOpen(true);
   };
@@ -789,6 +926,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     setEventEditDraft({
       id: eventItem.id,
       title: eventItem.title,
+      type: eventItem.type ?? "survey",
+      surveyKind: eventItem.surveyKind ?? "general",
+      eventKind: eventItem.eventKind ?? "general",
+      showInEventList: eventItem.showInEventList ?? true,
+      linkedSurveyId: eventItem.linkedSurveyId ?? "",
+      phase: eventItem.phase ?? "preSurvey",
       status: eventItem.status,
       description: eventItem.description,
       opensAt: getLocalDateTimeValue(eventItem.opensAt),
@@ -807,6 +950,24 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
     updateEvent(selectedGuide.id, eventEditDraft.id, {
       title: eventEditDraft.title,
+      type: eventEditDraft.type,
+      surveyKind: eventEditDraft.type === "survey" ? eventEditDraft.surveyKind : undefined,
+      eventKind:
+        eventEditDraft.type === "event"
+          ? eventEditDraft.eventKind === "bowling" || eventEditDraft.title.includes("볼링")
+            ? "bowling"
+            : eventEditDraft.eventKind
+          : undefined,
+      showInEventList: eventEditDraft.showInEventList,
+      linkedSurveyId:
+        eventEditDraft.type === "event" && eventEditDraft.linkedSurveyId
+          ? eventEditDraft.linkedSurveyId
+          : undefined,
+      phase:
+        eventEditDraft.type === "event" &&
+        (eventEditDraft.eventKind === "bowling" || eventEditDraft.title.includes("볼링"))
+          ? eventEditDraft.phase
+          : undefined,
       status: eventEditDraft.status,
       description: eventEditDraft.description,
       opensAt: getIsoDateTimeValue(eventEditDraft.opensAt),
@@ -1689,6 +1850,19 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             {eventItem.requiresTeamAssignment ? "조 배치 사용" : "조 배치 미사용"}
                           </span>
                           <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
+                            {eventTypeLabels[eventItem.type ?? "survey"]}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-1 text-[11px] font-bold",
+                              eventItem.showInEventList === false
+                                ? "bg-gray-900 text-white"
+                                : "bg-emerald-50 text-emerald-700",
+                            )}
+                          >
+                            {eventItem.showInEventList === false ? "이벤트 탭 숨김" : "이벤트 탭 노출"}
+                          </span>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
                             문항 {eventItem.survey.length}개
                           </span>
                           <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
@@ -2074,8 +2248,13 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
           description="기존 템플릿 기반으로 이벤트를 추가합니다."
           onClose={() => {
             setEventTitle("");
-            setEventTemplateId("activity");
-            setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+            setEventTemplateId("activitySurvey");
+            setEventAddType(getEventTemplateDefaults("activitySurvey").type);
+            setEventAddShowInEventList(getEventTemplateDefaults("activitySurvey").showInEventList);
+            setEventAddLinkedSurveyId("");
+            setEventRequiresTeamAssignment(
+              getEventTemplateDefaults("activitySurvey").requiresTeamAssignment,
+            );
             setEventStatus("waiting");
             setIsEventAddModalOpen(false);
           }}
@@ -2097,15 +2276,18 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   className={fieldClass}
                   onChange={(event) => {
                     const nextTemplateId = event.target.value as EventTemplateId;
+                    const nextDefaults = getEventTemplateDefaults(nextTemplateId);
                     setEventTemplateId(nextTemplateId);
-                    setEventRequiresTeamAssignment(
-                      eventTemplateRequiresTeamAssignment[nextTemplateId],
-                    );
+                    setEventAddType(nextDefaults.type);
+                    setEventAddShowInEventList(nextDefaults.showInEventList);
+                    setEventRequiresTeamAssignment(nextDefaults.requiresTeamAssignment);
+                    setEventAddLinkedSurveyId("");
                   }}
                   value={eventTemplateId}
                 >
-                  <option value="activity">액티비티 사전 설문</option>
-                  <option value="bowling">볼링 대회 레벨 테스트</option>
+                  <option value="activitySurvey">액티비티 사전 설문</option>
+                  <option value="bowlingLevelSurvey">볼링 대회 레벨 테스트</option>
+                  <option value="bowlingEvent">대표님배 볼링대회</option>
                 </select>
               </label>
               <label>
@@ -2123,26 +2305,74 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 </select>
               </label>
             </div>
-            <label className="block rounded-lg bg-gray-50 p-3">
-              <span className="inline-flex min-h-6 items-center gap-2 text-sm font-semibold text-gray-700">
-                <input
-                  checked={eventRequiresTeamAssignment}
-                  className="h-4 w-4 accent-brand-700"
-                  onChange={(event) => setEventRequiresTeamAssignment(event.target.checked)}
-                  type="checkbox"
-                />
-                조 배치 사용
-              </span>
-              <span className="mt-1 block text-xs leading-5 text-gray-500">
-                체크하면 응답자를 조별로 배정하고 참가자가 자기 조를 확인할 수 있습니다.
-              </span>
-            </label>
+            <div className="grid gap-3 rounded-lg bg-gray-50 p-3 md:grid-cols-2">
+              <label>
+                <span className={labelClass}>이벤트 타입</span>
+                <select
+                  className={fieldClass}
+                  onChange={(event) => setEventAddType(event.target.value as EventType)}
+                  value={eventAddType}
+                >
+                  {Object.entries(eventTypeLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid gap-2 pt-1">
+                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700">
+                  <input
+                    checked={eventAddShowInEventList}
+                    className="h-4 w-4 accent-brand-700"
+                    onChange={(event) => setEventAddShowInEventList(event.target.checked)}
+                    type="checkbox"
+                  />
+                  이벤트 탭 노출
+                </label>
+                <label className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-white px-3 text-sm font-semibold text-gray-700">
+                  <input
+                    checked={eventRequiresTeamAssignment}
+                    className="h-4 w-4 accent-brand-700"
+                    onChange={(event) => setEventRequiresTeamAssignment(event.target.checked)}
+                    type="checkbox"
+                  />
+                  조 배치 사용
+                </label>
+              </div>
+              {eventAddType === "event" && eventTemplateId === "bowlingEvent" ? (
+                <label className="md:col-span-2">
+                  <span className={labelClass}>연결 설문</span>
+                  <select
+                    className={fieldClass}
+                    onChange={(event) => setEventAddLinkedSurveyId(event.target.value)}
+                    value={eventAddLinkedSurveyId}
+                  >
+                    <option value="">자동 선택</option>
+                    {selectedGuide.events
+                      .filter((eventItem) => eventItem.type === "survey")
+                      .map((eventItem) => (
+                        <option key={eventItem.id} value={eventItem.id}>
+                          {eventItem.title}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
+            </div>
             <div className="grid grid-cols-2 gap-2 pt-2">
               <Button
                 onClick={() => {
                   setEventTitle("");
-                  setEventTemplateId("activity");
-                  setEventRequiresTeamAssignment(eventTemplateRequiresTeamAssignment.activity);
+                  setEventTemplateId("activitySurvey");
+                  setEventAddType(getEventTemplateDefaults("activitySurvey").type);
+                  setEventAddShowInEventList(
+                    getEventTemplateDefaults("activitySurvey").showInEventList,
+                  );
+                  setEventAddLinkedSurveyId("");
+                  setEventRequiresTeamAssignment(
+                    getEventTemplateDefaults("activitySurvey").requiresTeamAssignment,
+                  );
                   setEventStatus("waiting");
                   setIsEventAddModalOpen(false);
                 }}
@@ -2631,18 +2861,78 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 </select>
               </label>
               <label>
-                <span className={labelClass}>오픈</span>
-                <input
+                <span className={labelClass}>이벤트 타입</span>
+                <select
                   className={fieldClass}
                   onChange={(event) =>
-                    setEventEditDraft({ ...eventEditDraft, opensAt: event.target.value })
+                    setEventEditDraft({
+                      ...eventEditDraft,
+                      type: event.target.value as EventType,
+                      surveyKind:
+                        event.target.value === "survey" ? eventEditDraft.surveyKind : "general",
+                      eventKind:
+                        event.target.value === "event"
+                          ? eventEditDraft.title.includes("볼링")
+                            ? "bowling"
+                            : eventEditDraft.eventKind
+                          : "general",
+                    })
                   }
-                  type="datetime-local"
-                  value={eventEditDraft.opensAt}
-                />
+                  value={eventEditDraft.type}
+                >
+                  {Object.entries(eventTypeLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {eventEditDraft.type === "event" &&
+              (eventEditDraft.eventKind === "bowling" || eventEditDraft.title.includes("볼링")) ? (
+                <label>
+                  <span className={labelClass}>연결 설문</span>
+                  <select
+                    className={fieldClass}
+                    onChange={(event) =>
+                      setEventEditDraft({
+                        ...eventEditDraft,
+                        linkedSurveyId: event.target.value,
+                      })
+                    }
+                    value={eventEditDraft.linkedSurveyId}
+                  >
+                    <option value="">자동 선택</option>
+                    {selectedGuide.events
+                      .filter((eventItem) => eventItem.type === "survey")
+                      .map((eventItem) => (
+                        <option key={eventItem.id} value={eventItem.id}>
+                          {eventItem.title}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
+              <label className="rounded-lg bg-gray-50 p-3">
+                <span className="inline-flex min-h-6 items-center gap-2 text-sm font-semibold text-gray-700">
+                  <input
+                    checked={eventEditDraft.showInEventList}
+                    className="h-4 w-4 accent-brand-700"
+                    onChange={(event) =>
+                      setEventEditDraft({
+                        ...eventEditDraft,
+                        showInEventList: event.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                  이벤트 탭 노출
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-gray-500">
+                  꺼도 관리자 이벤트 관리에는 계속 표시됩니다.
+                </span>
               </label>
               <label>
-                <span className={labelClass}>종료</span>
+                <span className={labelClass}>종료일</span>
                 <input
                   className={fieldClass}
                   onChange={(event) =>
@@ -2974,6 +3264,111 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         응답 {responseManageEventResponses.length}개
                       </span>
                     </div>
+
+                    {responseManageEvent.type === "survey" &&
+                    responseManageEvent.surveyKind === "bowlingLevel" ? (
+                      <section className="mt-3 rounded-lg border border-brand-100 bg-brand-50 p-3">
+                        <h4 className="font-bold text-brand-950">볼링 레벨 테스트 빠른 확인</h4>
+                        <div className="mt-3 space-y-2">
+                          {responseManageEventResponses.length > 0 ? (
+                            responseManageEventResponses.map((response) => (
+                              <div
+                                className="rounded-lg bg-white p-3 text-sm"
+                                key={response.id}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="font-bold text-gray-950">
+                                    {response.participantName}
+                                  </span>
+                                  <span className="text-xs font-bold text-brand-700">
+                                    {getTeamAssignmentLabel(responseManageEvent, response)}
+                                  </span>
+                                </div>
+                                <div className="mt-2 grid gap-1 text-xs leading-5 text-gray-600 sm:grid-cols-2">
+                                  <span>목표점수: {formatAnswerValue(response.answers.targetScore ?? "-")}</span>
+                                  <span>실력: {formatAnswerValue(response.answers.level ?? "-")}</span>
+                                  <span>경험: {formatAnswerValue(response.answers.experience ?? "-")}</span>
+                                  <span>커브/스핀: {formatAnswerValue(response.answers.curve ?? "-")}</span>
+                                  <span className="sm:col-span-2">
+                                    평균점수: {formatAnswerValue(response.answers.averageScore ?? "-")}
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="rounded-lg bg-white p-3 text-sm text-gray-500">
+                              저장된 레벨 테스트 응답이 없습니다.
+                            </p>
+                          )}
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {responseManageEvent.type === "event" &&
+                    responseManageEvent.eventKind === "bowling" ? (
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <section className="rounded-lg border border-gray-200 bg-white p-3">
+                          <h4 className="font-bold text-gray-950">점수 제출 현황</h4>
+                          <div className="mt-3 space-y-2">
+                            {responseManageEventResponses.length > 0 ? (
+                              responseManageEventResponses.map((response) => {
+                                const game1Score = getNumericResponseAnswer(response, "game1Score");
+                                const game2Score = getNumericResponseAnswer(response, "game2Score");
+
+                                return (
+                                  <div
+                                    className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-2 text-sm"
+                                    key={response.id}
+                                  >
+                                    <span className="font-bold text-gray-950">
+                                      {response.participantName}
+                                    </span>
+                                    <span className="text-xs font-semibold text-gray-600">
+                                      1G {game1Score ?? "-"} / 2G {game2Score ?? "-"}
+                                    </span>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                                저장된 응답이 없습니다.
+                              </p>
+                            )}
+                          </div>
+                        </section>
+
+                        <section className="rounded-lg border border-gray-200 bg-white p-3">
+                          <h4 className="font-bold text-gray-950">조별 합산 순위</h4>
+                          <div className="mt-3 space-y-2">
+                            {getBowlingTeamRankings(
+                              responseManageEvent,
+                              responseManageEventResponses,
+                            ).length > 0 ? (
+                              getBowlingTeamRankings(
+                                responseManageEvent,
+                                responseManageEventResponses,
+                              ).map((ranking, index) => (
+                                <div
+                                  className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-2 text-sm"
+                                  key={ranking.team.id}
+                                >
+                                  <span className="font-bold text-gray-950">
+                                    {index + 1}. {ranking.team.name}
+                                  </span>
+                                  <span className="text-xs font-semibold text-brand-700">
+                                    {ranking.totalScore}점 · 제출 {ranking.submittedCount}명
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+                                등록된 조가 없습니다.
+                              </p>
+                            )}
+                          </div>
+                        </section>
+                      </div>
+                    ) : null}
 
                     <div className="mt-3 space-y-3">
                       {responseManageEvent.survey.length > 0 ? (
