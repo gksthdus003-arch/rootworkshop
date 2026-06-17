@@ -4,9 +4,9 @@
 
 @layer base {
   @font-face {
-    font-family: "Cafe24ProUp";
+    font-family: 'Cafe24PROUP';
     font-display: swap;
-    src: local("Cafe24 ProUp"), local("Cafe24ProUp");
+    src: url('/fonts/Cafe24PROUP.woff2') format('woff2');
   }
 
   :root {
@@ -50,6 +50,17 @@
   }
 }
 
+@layer utilities {
+  .font-proUp {
+    font-family:
+      'Cafe24PROUP',
+      Pretendard,
+      ui-sans-serif,
+      system-ui,
+      sans-serif !important;
+  }
+}
+
 @layer components {
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);
@@ -81,11 +92,11 @@
 
   .font-cafe24-pro-up {
     font-family:
-      "Cafe24ProUp",
+      "Cafe24PROUP",
       Pretendard,
       ui-sans-serif,
       system-ui,
-      sans-serif;
+      sans-serif !important;
   }
 }
 

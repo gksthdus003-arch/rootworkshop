@@ -1131,7 +1131,7 @@ const BowlingEventBoardPage = ({
       style={getPositionStyle(rect)}
     >
       <div className="rounded-lg bg-black/70 px-5 py-4 text-white shadow-2xl">
-        <p className="font-cafe24-pro-up text-[clamp(28px,8vw,46px)] font-black leading-none text-[#f7ff2b]">
+        <p className="font-proUp text-[clamp(28px,8vw,46px)] font-black leading-none text-[#f7ff2b]">
           D-00
         </p>
         <p className="mt-2 text-[clamp(15px,4vw,22px)] font-black leading-tight">
@@ -1154,7 +1154,7 @@ const BowlingEventBoardPage = ({
       />
 
       <div
-        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center text-[clamp(42px,12vw,90px)] font-black leading-none text-[#fff252] drop-shadow-[0_0_10px_rgba(255,44,226,0.95)]"
+        className="font-proUp absolute z-10 flex items-center justify-center text-center text-[clamp(42px,12vw,90px)] font-black leading-none text-[#fff252] drop-shadow-[0_0_10px_rgba(255,44,226,0.95)]"
         style={getPositionStyle(bowlingEventOverlay.targetScore)}
       >
         {targetScore ?? "?"}
@@ -1186,13 +1186,13 @@ const BowlingEventBoardPage = ({
       />
 
       <div
-        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
+        className="font-proUp absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
         style={getPositionStyle(bowlingEventOverlay.game1Score)}
       >
         {game1Score ?? ""}
       </div>
       <div
-        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
+        className="font-proUp absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
         style={getPositionStyle(bowlingEventOverlay.game2Score)}
       >
         {game2Score ?? ""}
