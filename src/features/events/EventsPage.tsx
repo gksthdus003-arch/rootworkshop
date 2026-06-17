@@ -11,7 +11,6 @@ import { Card } from "../../components/common/Card";
 import {
   bowlingEventBoard,
   bowlingEventOverlay,
-  bowlingRankingRows,
   type BowlingOverlayRect,
 } from "../../config/bowlingEventOverlay";
 import { cn } from "../../lib/cn";
@@ -57,11 +56,19 @@ const createId = () => {
   return `event-response-${Date.now()}`;
 };
 
-const isAnswered = (value: string | string[] | undefined) =>
-  Array.isArray(value) ? value.length > 0 : Boolean(value?.trim());
+const isAnswered = (value: string | string[] | number | undefined) =>
+  Array.isArray(value) ? value.length > 0 : value !== undefined && String(value).trim() !== "";
 
-const formatAnswerValue = (value: string | string[]) =>
-  Array.isArray(value) ? value.join(", ") : value;
+const formatAnswerValue = (value: string | string[] | number) =>
+  Array.isArray(value) ? value.join(", ") : String(value);
+
+const getSurveyAnswerDrafts = (response: EventSurveyResponse | undefined) =>
+  Object.fromEntries(
+    Object.entries(response?.answers ?? {}).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value : String(value),
+    ]),
+  ) as Record<string, string | string[]>;
 
 interface SurveyQuestionViewProps {
   answer?: string | string[];
@@ -222,7 +229,7 @@ const SurveyFlowPage = ({
 }: SurveyFlowPageProps) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(
-    savedResponse?.answers ?? {},
+    getSurveyAnswerDrafts(savedResponse),
   );
   const [errorMessage, setErrorMessage] = useState("");
   const question = event.survey[stepIndex];
@@ -364,7 +371,7 @@ const SurveyFlowModal = ({
 }: SurveyFlowPageProps) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(
-    savedResponse?.answers ?? {},
+    getSurveyAnswerDrafts(savedResponse),
   );
   const [errorMessage, setErrorMessage] = useState("");
   const question = event.survey[stepIndex];
@@ -649,9 +656,18 @@ const getAssignedTeam = (
   event: EventItem,
   participantName?: string,
   response?: EventSurveyResponse,
-) =>
-  event.teams.find((team) => team.id === response?.assignedTeamId) ??
-  event.teams.find((team) => (participantName ? team.members.includes(participantName) : false));
+) => {
+  const normalizedParticipantName = participantName?.trim();
+
+  return (
+    event.teams.find((team) => team.id === response?.assignedTeamId) ??
+    event.teams.find((team) =>
+      normalizedParticipantName
+        ? team.members.some((member) => member.trim() === normalizedParticipantName)
+        : false,
+    )
+  );
+};
 
 const getEventType = (event: EventItem): EventType => {
   const rawType = (event as { type?: unknown }).type;
@@ -737,7 +753,7 @@ const findLinkedSurveyEvent = (events: EventItem[], event: EventItem) => {
 
 const getTextAnswer = (response: EventSurveyResponse | undefined, key: string) => {
   const value = response?.answers[key];
-  return Array.isArray(value) ? value.join(", ") : value ?? "";
+  return Array.isArray(value) ? value.join(", ") : value !== undefined ? String(value) : "";
 };
 
 const getNumericAnswer = (response: EventSurveyResponse | undefined, key: string) => {
@@ -746,47 +762,112 @@ const getNumericAnswer = (response: EventSurveyResponse | undefined, key: string
   return Number.isFinite(numberValue) && value !== "" ? numberValue : undefined;
 };
 
+const getTextAnswerByKeyOrLabel = (
+  event: EventItem | undefined,
+  response: EventSurveyResponse | undefined,
+  key: string,
+  labelKeyword: string,
+) => {
+  const directValue = getTextAnswer(response, key);
+
+  if (directValue) {
+    return directValue;
+  }
+
+  const matchedQuestion = event?.survey.find((question) => question.label.includes(labelKeyword));
+
+  return matchedQuestion ? getTextAnswer(response, matchedQuestion.id) : "";
+};
+
+const getNumericAnswerByKeyOrLabel = (
+  event: EventItem | undefined,
+  response: EventSurveyResponse | undefined,
+  key: string,
+  labelKeyword: string,
+) => {
+  const value = getTextAnswerByKeyOrLabel(event, response, key, labelKeyword);
+  const numberValue = Number(value);
+
+  return Number.isFinite(numberValue) && value !== "" ? numberValue : undefined;
+};
+
 const getParticipantTotalScore = (response: EventSurveyResponse | undefined) =>
   (getNumericAnswer(response, "game1Score") ?? 0) + (getNumericAnswer(response, "game2Score") ?? 0);
 
-const formatTargetDiff = (score: number | undefined, targetScore: number | undefined) => {
+const getTargetDiffMeta = (score: number | undefined, targetScore: number | undefined) => {
   if (score === undefined || targetScore === undefined) {
-    return "";
+    return undefined;
   }
 
   const diff = score - targetScore;
 
-  return diff > 0 ? `+${diff}` : String(diff);
+  return {
+    label: diff > 0 ? `+${diff}` : String(diff),
+    tone: diff > 0 ? "positive" : diff < 0 ? "negative" : "same",
+  };
 };
 
-const getBowlingTeamRankings = (event: EventItem, responses: EventSurveyResponse[]) =>
-  event.teams
-    .map((team) => {
-      const teamResponses = responses.filter(
-        (response) =>
-          response.assignedTeamId === team.id || team.members.includes(response.participantName),
-      );
+const getNormalizedParticipantName = (name: string | undefined) => name?.trim() ?? "";
+
+const isSameParticipantResponse = (left: EventSurveyResponse, right: EventSurveyResponse) => {
+  if (left.participantId && right.participantId) {
+    return left.participantId === right.participantId;
+  }
+
+  return (
+    getNormalizedParticipantName(left.participantName) !== "" &&
+    getNormalizedParticipantName(left.participantName) ===
+      getNormalizedParticipantName(right.participantName)
+  );
+};
+
+const findParticipantResponse = (
+  responses: EventSurveyResponse[],
+  participantResponse: EventSurveyResponse,
+) => responses.find((response) => isSameParticipantResponse(response, participantResponse));
+
+const getBowlingTeamRankings = (
+  teamSourceEvent: EventItem,
+  scoreResponses: EventSurveyResponse[],
+  teamResponses: EventSurveyResponse[] = scoreResponses,
+) =>
+  teamSourceEvent.teams
+    .map((team, index) => {
+      const teamScoreResponses = scoreResponses.filter((scoreResponse) => {
+        const teamResponse = findParticipantResponse(teamResponses, scoreResponse);
+        const responseName = getNormalizedParticipantName(
+          teamResponse?.participantName ?? scoreResponse.participantName,
+        );
+
+        return (
+          teamResponse?.assignedTeamId === team.id ||
+          scoreResponse.assignedTeamId === team.id ||
+          team.members.some((member) => member.trim() === responseName)
+        );
+      });
 
       return {
         team,
-        totalScore: teamResponses.reduce(
+        index,
+        totalScore: teamScoreResponses.reduce(
           (sum, response) => sum + getParticipantTotalScore(response),
           0,
         ),
-        submittedCount: teamResponses.filter(
+        submittedCount: teamScoreResponses.filter(
           (response) =>
             getNumericAnswer(response, "game1Score") !== undefined ||
             getNumericAnswer(response, "game2Score") !== undefined,
         ).length,
       };
     })
-    .sort((left, right) => right.totalScore - left.totalScore);
+    .sort((left, right) => right.totalScore - left.totalScore || left.index - right.index);
 
 const getPositionStyle = (rect: BowlingOverlayRect) => ({
   left: rect.left,
   top: rect.top,
   width: rect.width,
   height: rect.height,
+  fontSize: rect.fontSize,
 });
 
 interface EventPageShellProps {
@@ -881,9 +962,24 @@ const ScoreInputModal = ({
     setter(value.replace(/\D/g, ""));
   };
 
+  const validateScore = (value: string) => {
+    if (value === "") {
+      return true;
+    }
+
+    const score = Number(value);
+
+    return Number.isInteger(score) && score >= 0 && score <= 300;
+  };
+
   const handleSave = () => {
     if (!participantProfile?.name) {
       setErrorMessage("이름 입력 후 점수를 저장할 수 있습니다.");
+      return;
+    }
+
+    if (!validateScore(game1Score) || !validateScore(game2Score)) {
+      setErrorMessage("점수는 비워두거나 0~300 사이 숫자로 입력해 주세요.");
       return;
     }
 
@@ -898,8 +994,8 @@ const ScoreInputModal = ({
         assignedTeam?.id ?? response?.assignedTeamId ?? getAssignedTeam(event, participantProfile.name)?.id,
       answers: {
         ...(response?.answers ?? {}),
-        game1Score,
-        game2Score,
+        game1Score: game1Score === "" ? "" : Number(game1Score),
+        game2Score: game2Score === "" ? "" : Number(game2Score),
       },
     });
     onClose();
@@ -967,6 +1063,7 @@ const ScoreInputModal = ({
 interface BowlingEventBoardPageProps {
   assignedTeam?: EventItem["teams"][number];
   canEditScores: boolean;
+  canOpenLevelTest: boolean;
   event: EventItem;
   game1Score?: number;
   game2Score?: number;
@@ -983,6 +1080,7 @@ interface BowlingEventBoardPageProps {
 const BowlingEventBoardPage = ({
   assignedTeam,
   canEditScores,
+  canOpenLevelTest,
   event,
   game1Score,
   game2Score,
@@ -1005,8 +1103,27 @@ const BowlingEventBoardPage = ({
         assignedTeam.members.length > 0 ? assignedTeam.members.join(", ") : "조원 등록 대기"
       }`
     : "조 배정은 곧 공개됩니다";
-  const rankMessage =
-    myTeamRank > 0 ? `현재 우리 팀은 ${myTeamRank}위입니다.` : "순위는 점수 입력 후 공개됩니다.";
+  const rankMessage = myTeamRank > 0 ? `현재 우리 팀은 ${myTeamRank}위입니다.` : "";
+  const game1Diff = getTargetDiffMeta(game1Score, targetScore);
+  const game2Diff = getTargetDiffMeta(game2Score, targetScore);
+  const renderTargetDiff = (diff: ReturnType<typeof getTargetDiffMeta>) =>
+    diff ? (
+      <span className="inline-flex items-baseline justify-center gap-1 whitespace-nowrap">
+        <span className="text-black"></span>
+        <span
+          className={cn(
+            "font-black",
+            diff.tone === "positive"
+              ? "text-[#e11d48]"
+              : diff.tone === "negative"
+                ? "text-[#2563eb]"
+                : "text-gray-700",
+          )}
+        >
+          {diff.label}
+        </span>
+      </span>
+    ) : null;
 
   const renderPrivacyOverlay = (rect: BowlingOverlayRect) => (
     <div
@@ -1037,7 +1154,7 @@ const BowlingEventBoardPage = ({
       />
 
       <div
-        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center text-[clamp(42px,12vw,76px)] font-black leading-none text-[#fff252] drop-shadow-[0_0_10px_rgba(255,44,226,0.95)]"
+        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center text-[clamp(42px,12vw,90px)] font-black leading-none text-[#fff252] drop-shadow-[0_0_10px_rgba(255,44,226,0.95)]"
         style={getPositionStyle(bowlingEventOverlay.targetScore)}
       >
         {targetScore ?? "?"}
@@ -1046,14 +1163,14 @@ const BowlingEventBoardPage = ({
       <button
         aria-label={hasSubmittedPreSurvey ? "레벨 테스트 수정하기" : "레벨 테스트하기"}
         className="absolute z-20 rounded-full bg-transparent outline-none transition focus-visible:ring-4 focus-visible:ring-fuchsia-300/70 disabled:pointer-events-none"
-        disabled={event.status !== "active"}
+        disabled={!canOpenLevelTest}
         onClick={onLevelTestOpen}
         style={getPositionStyle(bowlingEventOverlay.levelTestButton)}
         type="button"
       />
 
       <div
-        className="absolute z-10 flex items-center justify-center px-4 text-center text-[clamp(12px,3.2vw,17px)] font-black leading-snug text-[#14102a]"
+        className="absolute z-10 flex items-center justify-center px-4 text-center text-[clamp(25px,3.2vw,17px)] font-black leading-snug text-[#14102a]"
         style={getPositionStyle(bowlingEventOverlay.teamMembers)}
       >
         <span className="line-clamp-3 break-keep">{teamMemberText}</span>
@@ -1069,70 +1186,91 @@ const BowlingEventBoardPage = ({
       />
 
       <div
-        className="absolute z-10 flex items-center justify-center text-center text-[clamp(40px,12vw,72px)] font-black leading-none text-black"
+        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
         style={getPositionStyle(bowlingEventOverlay.game1Score)}
       >
         {game1Score ?? ""}
       </div>
       <div
-        className="absolute z-10 flex items-center justify-center text-center text-[clamp(40px,12vw,72px)] font-black leading-none text-black"
+        className="font-cafe24-pro-up absolute z-10 flex items-center justify-center text-center font-black leading-none text-[#5b21ff] drop-shadow-[0_2px_0_rgba(255,255,255,0.85)] [text-shadow:0_0_8px_rgba(91,33,255,0.28)]"
         style={getPositionStyle(bowlingEventOverlay.game2Score)}
       >
         {game2Score ?? ""}
       </div>
       <div
-        className="absolute z-10 flex items-center justify-center text-center text-[clamp(12px,3.4vw,18px)] font-black leading-none text-black"
+        className="absolute z-10 flex items-center justify-center text-center font-black leading-none"
         style={getPositionStyle(bowlingEventOverlay.game1Diff)}
       >
-        {formatTargetDiff(game1Score, targetScore)}
+        {renderTargetDiff(game1Diff)}
       </div>
       <div
-        className="absolute z-10 flex items-center justify-center text-center text-[clamp(12px,3.4vw,18px)] font-black leading-none text-black"
+        className="absolute z-10 flex items-center justify-center text-center font-black leading-none"
         style={getPositionStyle(bowlingEventOverlay.game2Diff)}
       >
-        {formatTargetDiff(game2Score, targetScore)}
+        {renderTargetDiff(game2Diff)}
       </div>
 
       <div
-        className="absolute z-10 flex items-center justify-center bg-black px-3 text-center text-[clamp(11px,3vw,16px)] font-black leading-tight text-[#f6ff29]"
+        className="absolute z-10 flex items-center justify-center bg-black px-3 text-center font-black leading-tight text-[#f6ff29]"
         style={getPositionStyle(bowlingEventOverlay.teamRankMessage)}
       >
         {isPreSurvey ? "" : rankMessage}
       </div>
 
-      {bowlingRankingRows.map((row, index) => {
-        const ranking = visibleRankings[index];
-        const membersText = ranking?.team.members.join(", ") ?? "";
-
-        return (
-          <div key={index}>
-            <div
-              className="absolute z-10 flex items-center justify-center text-center text-[clamp(10px,2.8vw,14px)] font-black text-gray-950"
-              style={getPositionStyle(row.rank)}
-            >
-              {ranking ? `${index + 1}위` : ""}
-            </div>
-            <div
-              className="absolute z-10 flex items-center justify-center px-1 text-center text-[clamp(10px,2.8vw,14px)] font-black text-gray-950"
-              style={getPositionStyle(row.team)}
-            >
-              <span className="truncate">{ranking?.team.name ?? ""}</span>
-            </div>
-            <div
-              className="absolute z-10 flex items-center justify-center text-center text-[clamp(10px,2.8vw,14px)] font-black text-gray-950"
-              style={getPositionStyle(row.score)}
-            >
-              {ranking ? `${ranking.totalScore}점` : ""}
-            </div>
-            <div
-              className="absolute z-10 flex items-center justify-start px-1 text-[clamp(9px,2.4vw,13px)] font-bold leading-tight text-gray-800"
-              style={getPositionStyle(row.members)}
-            >
-              <span className="line-clamp-2 break-keep">{membersText}</span>
-            </div>
-          </div>
-        );
-      })}
+      <div
+        className="absolute z-10 overflow-hidden rounded-sm border border-gray-300 bg-white/96 text-gray-950 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+        style={getPositionStyle(bowlingEventOverlay.rankingTable)}
+      >
+        <table className="h-full w-full table-fixed border-collapse text-center font-bold leading-tight text-gray-950">
+          <colgroup>
+            <col className="w-[15%]" />
+            <col className="w-[18%]" />
+            <col className="w-[20%]" />
+            <col className="w-[47%]" />
+          </colgroup>
+          <thead className="bg-[#eadcff]">
+            <tr>
+              {["순위", "조", "점수", "조원"].map((header) => (
+                <th
+                  className="border-b border-r border-gray-300 px-1 py-1 last:border-r-0"
+                  key={header}
+                  scope="col"
+                >
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRankings.length > 0 ? (
+              visibleRankings.map((ranking, index) => (
+                <tr className="border-b border-gray-300 last:border-b-0" key={ranking.team.id}>
+                  <td className="border-r border-gray-300 px-1 py-1 align-middle font-black">
+                    {index + 1}위
+                  </td>
+                  <td className="border-r border-gray-300 px-1 py-1 align-middle font-black">
+                    <span className="block truncate">{ranking.team.name || "-"}</span>
+                  </td>
+                  <td className="border-r border-gray-300 px-1 py-1 align-middle font-black">
+                    {ranking.totalScore > 0 ? `${ranking.totalScore}점` : "-"}
+                  </td>
+                  <td className="px-1.5 py-1 text-left align-middle font-bold">
+                    <span className="block whitespace-normal break-keep leading-tight">
+                      {ranking.team.members.length > 0 ? ranking.team.members.join(", ") : "-"}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-2 py-3 text-center font-bold text-gray-700" colSpan={4}>
+                  -
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       {isPreSurvey ? renderPrivacyOverlay(bowlingEventOverlay.scoreBlur) : null}
       {isPreSurvey ? renderPrivacyOverlay(bowlingEventOverlay.rankingBlur) : null}
@@ -1176,18 +1314,29 @@ const EventOnePage = ({
   const levelSurveyResponse = levelSurveyEvent
     ? responseByEventId.get(levelSurveyEvent.id)
     : undefined;
+  const bowlingScoreResponses = eventResponses.filter((eventResponse) => eventResponse.eventId === event.id);
+  const levelSurveyResponses = levelSurveyEvent
+    ? eventResponses.filter((eventResponse) => eventResponse.eventId === levelSurveyEvent.id)
+    : [];
   const bowlingTeamSourceEvent = levelSurveyEvent ?? event;
   const participantName = participantProfile?.name;
-  const assignedTeam =
-    getAssignedTeam(event, participantName, response) ??
-    getAssignedTeam(levelSurveyEvent ?? event, participantName, levelSurveyResponse);
-  const phase = event.phase ?? (event.status === "closed" ? "result" : "preSurvey");
-  const canEditScores =
-    shouldRenderBowlingBoard && phase === "scoreInput" && event.status === "active";
-  const targetScore = getNumericAnswer(levelSurveyResponse ?? response, "targetScore");
+  const assignedTeam = getAssignedTeam(bowlingTeamSourceEvent, participantName, levelSurveyResponse);
+  const phase = event.phase ?? "preSurvey";
+  const canOpenLevelTest = shouldRenderBowlingBoard && phase !== "result";
+  const canEditScores = shouldRenderBowlingBoard && phase === "scoreInput";
+  const targetScore = getNumericAnswerByKeyOrLabel(
+    levelSurveyEvent ?? event,
+    levelSurveyResponse ?? response,
+    "targetScore",
+    "목표",
+  );
   const game1Score = getNumericAnswer(response, "game1Score");
   const game2Score = getNumericAnswer(response, "game2Score");
-  const rankings = getBowlingTeamRankings(bowlingTeamSourceEvent, eventResponses);
+  const rankings = getBowlingTeamRankings(
+    bowlingTeamSourceEvent,
+    bowlingScoreResponses,
+    levelSurveyEvent ? levelSurveyResponses : bowlingScoreResponses,
+  );
   const visibleRankings =
     phase === "preSurvey"
       ? []
@@ -1196,21 +1345,23 @@ const EventOnePage = ({
     ? visibleRankings.findIndex((ranking) => ranking.team.id === assignedTeam.id) + 1
     : 0;
   const hasAnyScore = game1Score !== undefined || game2Score !== undefined;
-  const hasSubmittedPreSurvey = Boolean(response);
+  const hasSubmittedPreSurvey = Boolean(levelSurveyResponse ?? response);
   const saveLevelTestAnswers = (answers: Record<string, string | string[]>) => {
     if (!participantProfile?.name) {
       return;
     }
 
+    const savedLevelResponse = levelSurveyEvent ? levelSurveyResponse : response;
+
     onSaveResponse({
-      id: response?.id ?? createId(),
+      id: savedLevelResponse?.id ?? createId(),
       guideId,
       eventId: (levelSurveyEvent ?? event).id,
       participantId: participantProfile.id,
       participantName: participantProfile.name,
       submittedAt: new Date().toISOString(),
-      assignedTeamId: (levelSurveyEvent ?? event).requiresTeamAssignment
-        ? getAssignedTeam(levelSurveyEvent ?? event, participantProfile.name, levelSurveyResponse)?.id
+      assignedTeamId: bowlingTeamSourceEvent.requiresTeamAssignment
+        ? getAssignedTeam(bowlingTeamSourceEvent, participantProfile.name, levelSurveyResponse)?.id
         : levelSurveyResponse?.assignedTeamId,
       answers: {
         ...(levelSurveyResponse?.answers ?? {}),
@@ -1230,6 +1381,7 @@ const EventOnePage = ({
         <BowlingEventBoardPage
           assignedTeam={assignedTeam}
           canEditScores={canEditScores}
+          canOpenLevelTest={canOpenLevelTest}
           event={event}
           game1Score={game1Score}
           game2Score={game2Score}
@@ -1445,14 +1597,17 @@ export const EventsPage = () => {
   }
 
   if (detailEvent) {
-    const detailEventResponses = eventResponses.filter(
-      (response) => response.guideId === selectedGuide.id && response.eventId === detailEvent.id,
+    const selectedGuideEventResponses = eventResponses.filter(
+      (response) => response.guideId === selectedGuide.id,
+    );
+    const detailEventResponses = selectedGuideEventResponses.filter(
+      (response) => response.eventId === detailEvent.id,
     );
 
     return (
       <EventOnePage
         event={detailEvent}
-        eventResponses={detailEventResponses}
+        eventResponses={isBowlingEvent(detailEvent) ? selectedGuideEventResponses : detailEventResponses}
         guideEvents={selectedGuide.events}
         guideId={selectedGuide.id}
         onBack={() => setDetailEventId(undefined)}
@@ -1483,60 +1638,50 @@ export const EventsPage = () => {
             const hasSubmitted = Boolean(response);
             const assignedTeam = getAssignedTeam(event, participantName, response);
             const hasAssignedTeam = Boolean(assignedTeam);
-            const eventType = getEventType(event);
             const isWaitingForTeam =
               event.status === "closed" && event.requiresTeamAssignment && !hasAssignedTeam;
 
             return (
               <Card key={event.id}>
-                <div className="flex items-start gap-2">
-                  <div className="rounded-full bg-brand-50 p-1.5 text-brand-700">
-                    <PartyPopper className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={cn(
-                          "rounded-full px-2 py-1 text-[11px] font-bold",
-                          eventStatusMeta[event.status].className,
-                        )}
-                      >
-                        {eventStatusMeta[event.status].label}
-                      </span>
-                      {event.requiresTeamAssignment ? (
-                        <span className="rounded-full bg-brand-50 px-2 py-1 text-[11px] font-bold text-brand-700">
-                          조 배치 사용
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
-                          설문형
-                        </span>
-                      )}
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
-                        {eventTypeLabels[eventType]}
-                      </span>
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-600">
-                        {getKindLabel(event)}
-                      </span>
+                <div className="flex items-start gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-2">
+                    <div className="shrink-0 rounded-full bg-brand-50 p-1.5 text-brand-700">
+                      <PartyPopper className="h-4 w-4" />
                     </div>
-                    <h2 className="mt-2 text-base font-bold text-gray-950">{event.title}</h2>
-                    <p className="mt-1 text-sm leading-5 text-gray-600">{event.description}</p>
+                    <h2 className="min-w-0 break-words pt-0.5 text-base font-bold leading-5 text-gray-950">
+                      {event.title}
+                    </h2>
+                  </div>
+                  <div className="ml-auto shrink-0">
+                    <span
+                      className={cn(
+                        "inline-flex rounded-full px-2 py-1 text-[11px] font-bold",
+                        eventStatusMeta[event.status].className,
+                      )}
+                    >
+                      {eventStatusMeta[event.status].label}
+                    </span>
+                  </div>
+                </div>
 
-                    {hasSubmitted ? (
-                      <div className="mt-2 space-y-1">
-                        <p className="flex items-center gap-1 text-xs font-bold text-brand-700">
-                          <CheckCircle2 className="h-4 w-4" />
-                          응답 제출 완료
-                        </p>
-                      </div>
-                    ) : null}
+                <div className="mt-2 flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-sm leading-5 text-gray-600">{event.description}</p>
                     {isWaitingForTeam ? (
                       <p className="mt-2 text-xs font-bold text-yellow-800">
                         조 배정 대기 중
                       </p>
                     ) : null}
                   </div>
+
+                  {hasSubmitted ? (
+                    <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5 text-center text-xs font-bold leading-tight text-brand-700">
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span className="w-12 break-keep">응답 완료</span>
+                    </div>
+                  ) : null}
                 </div>
+
                 <Button
                   className="mt-3 min-h-9 w-full py-1.5"
                   icon={

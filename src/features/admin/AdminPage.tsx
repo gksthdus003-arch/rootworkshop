@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -74,6 +74,12 @@ const eventTypeLabels: Record<EventType, string> = {
   event: "이벤트형",
 };
 
+const eventPhaseLabels: Record<EventPhase, string> = {
+  preSurvey: "사전 설문 단계",
+  scoreInput: "점수 입력 단계",
+  result: "결과 공개 단계",
+};
+
 const getEventTemplateDefaults = (templateId: EventTemplateId) => {
   if (templateId === "bowlingEvent") {
     return {
@@ -138,12 +144,30 @@ interface AdminModalProps {
 }
 
 const AdminModal = ({ title, description, children, onClose }: AdminModalProps) => (
-  <div
-    className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/45 px-3 py-4 sm:items-center"
-    role="dialog"
-    aria-modal="true"
-  >
-    <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+  <AdminModalFrame title={title} description={description} onClose={onClose}>
+    {children}
+  </AdminModalFrame>
+);
+
+const AdminModalFrame = ({ title, description, children, onClose }: AdminModalProps) => {
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-hidden overscroll-contain bg-gray-950/45 px-3 py-4 sm:items-center"
+      onTouchMove={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+      role="dialog"
+      aria-modal="true"
+    >
+    <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-2xl flex-col overflow-hidden overscroll-contain rounded-lg bg-white shadow-2xl">
       <div className="flex shrink-0 items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-bold text-gray-950">{title}</h2>
@@ -160,10 +184,17 @@ const AdminModal = ({ title, description, children, onClose }: AdminModalProps) 
           <X className="h-5 w-5" />
         </button>
       </div>
-      <div className="min-h-0 overflow-y-auto px-4 py-4">{children}</div>
+      <div
+        className="min-h-0 overflow-y-auto overscroll-contain px-4 py-4"
+        onTouchMove={(event) => event.stopPropagation()}
+        onWheel={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
     </div>
   </div>
-);
+  );
+};
 
 type LocationEditDraft = {
   id: string;
@@ -265,8 +296,8 @@ const getNextPosterVersion = (version: string) => {
   return `${prefix}${Number(numberText) + 1}`;
 };
 
-const formatAnswerValue = (value: string | string[]) =>
-  Array.isArray(value) ? value.join(", ") : value;
+const formatAnswerValue = (value: string | string[] | number) =>
+  Array.isArray(value) ? value.join(", ") : String(value);
 
 const getEventResponseTeam = (event: EventItem, response: EventSurveyResponse) =>
   event.teams.find((team) => team.id === response.assignedTeamId) ??
@@ -292,7 +323,11 @@ const getChoiceResponseSummary = (
 
   responses.forEach((response) => {
     const answer = response.answers[question.id];
-    const selectedOptions = Array.isArray(answer) ? answer : answer ? [answer] : [];
+    const selectedOptions = Array.isArray(answer)
+      ? answer
+      : answer !== undefined && answer !== ""
+        ? [String(answer)]
+        : [];
 
     selectedOptions.forEach((option) => {
       const currentNames = selectedByOption.get(option) ?? [];
@@ -313,11 +348,11 @@ const getShortTextResponseSummary = (
   responses
     .map((response) => {
       const answer = response.answers[question.id];
-      const answerText = Array.isArray(answer) ? answer.join(", ") : answer;
+      const answerText = Array.isArray(answer) ? answer.join(", ") : answer !== undefined ? String(answer) : "";
 
       return {
         participantName: response.participantName,
-        answerText: answerText?.trim() ?? "",
+        answerText: answerText.trim(),
       };
     })
     .filter((item) => item.answerText.length > 0);
@@ -330,32 +365,93 @@ const getNumericResponseAnswer = (response: EventSurveyResponse, key: string) =>
   return Number.isFinite(numberValue) && textValue !== "" ? numberValue : undefined;
 };
 
+const getResponseAnswerByKeyOrLabel = (
+  event: EventItem | undefined,
+  response: EventSurveyResponse,
+  key: string,
+  labelKeywords: string[],
+) => {
+  const directValue = response.answers[key];
+
+  if (directValue !== undefined) {
+    return directValue;
+  }
+
+  const matchedQuestion = event?.survey.find((question) =>
+    labelKeywords.some((keyword) => question.label.includes(keyword)),
+  );
+
+  return matchedQuestion ? response.answers[matchedQuestion.id] : undefined;
+};
+
 const getParticipantScoreTotal = (response: EventSurveyResponse) =>
   (getNumericResponseAnswer(response, "game1Score") ?? 0) +
   (getNumericResponseAnswer(response, "game2Score") ?? 0);
 
-const getBowlingTeamRankings = (event: EventItem, responses: EventSurveyResponse[]) =>
-  event.teams
-    .map((team) => {
-      const teamResponses = responses.filter(
-        (response) =>
-          response.assignedTeamId === team.id || team.members.includes(response.participantName),
-      );
+const formatTargetDiff = (score: number | undefined, targetScore: number | undefined) => {
+  if (score === undefined || targetScore === undefined) {
+    return "-";
+  }
+
+  const diff = score - targetScore;
+
+  return `목표보다 ${diff > 0 ? `+${diff}` : String(diff)}`;
+};
+
+const getNormalizedParticipantName = (name: string | undefined) => name?.trim() ?? "";
+
+const isSameParticipantResponse = (left: EventSurveyResponse, right: EventSurveyResponse) => {
+  if (left.participantId && right.participantId) {
+    return left.participantId === right.participantId;
+  }
+
+  return (
+    getNormalizedParticipantName(left.participantName) !== "" &&
+    getNormalizedParticipantName(left.participantName) ===
+      getNormalizedParticipantName(right.participantName)
+  );
+};
+
+const findParticipantResponse = (
+  responses: EventSurveyResponse[],
+  participantResponse: EventSurveyResponse,
+) => responses.find((response) => isSameParticipantResponse(response, participantResponse));
+
+const getBowlingTeamRankings = (
+  teamSourceEvent: EventItem,
+  scoreResponses: EventSurveyResponse[],
+  teamResponses: EventSurveyResponse[] = scoreResponses,
+) =>
+  teamSourceEvent.teams
+    .map((team, index) => {
+      const teamScoreResponses = scoreResponses.filter((scoreResponse) => {
+        const teamResponse = findParticipantResponse(teamResponses, scoreResponse);
+        const responseName = getNormalizedParticipantName(
+          teamResponse?.participantName ?? scoreResponse.participantName,
+        );
+
+        return (
+          teamResponse?.assignedTeamId === team.id ||
+          scoreResponse.assignedTeamId === team.id ||
+          team.members.some((member) => member.trim() === responseName)
+        );
+      });
 
       return {
         team,
-        totalScore: teamResponses.reduce(
+        index,
+        totalScore: teamScoreResponses.reduce(
           (sum, response) => sum + getParticipantScoreTotal(response),
           0,
         ),
-        submittedCount: teamResponses.filter(
+        submittedCount: teamScoreResponses.filter(
           (response) =>
             getNumericResponseAnswer(response, "game1Score") !== undefined ||
             getNumericResponseAnswer(response, "game2Score") !== undefined,
         ).length,
       };
     })
-    .sort((left, right) => right.totalScore - left.totalScore);
+    .sort((left, right) => right.totalScore - left.totalScore || left.index - right.index);
 
 const createEventFromTemplate = (
   templateId: EventTemplateId,
@@ -558,6 +654,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     lockAdmin,
     moveScheduleItem,
     moveSurveyQuestion,
+    participants,
     selectGuide,
     selectedGuide,
     setDefaultGuide,
@@ -624,6 +721,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   const [responseManageEventId, setResponseManageEventId] = useState<string>();
   const [responseManageTab, setResponseManageTab] = useState<ResponseManageTab>("summary");
   const [responseSummaryOpenKey, setResponseSummaryOpenKey] = useState<string>();
+  const [questionOptionDrafts, setQuestionOptionDrafts] = useState<Record<string, string>>({});
   const [recommendationDraft, setRecommendationDraft] = useState({
     title: "",
     locationLabel: "",
@@ -636,6 +734,9 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   const [recommendationEditDraft, setRecommendationEditDraft] =
     useState<RecommendationEditDraft | null>(null);
   const [groupDrafts, setGroupDrafts] = useState<
+    Record<string, { teamName: string; membersText: string; memo: string }>
+  >({});
+  const [teamEditDrafts, setTeamEditDrafts] = useState<
     Record<string, { teamName: string; membersText: string; memo: string }>
   >({});
   const [newPassword, setNewPassword] = useState("");
@@ -654,6 +755,84 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   const responseManageEventResponses = responseManageEvent
     ? selectedGuideResponses.filter((response) => response.eventId === responseManageEvent.id)
     : [];
+  const parseMemberNames = (membersText: string) =>
+    membersText
+      .split(",")
+      .map((member) => member.trim())
+      .filter(Boolean);
+  const getTargetScoreLabel = (participantName: string) => {
+    const targetResponse = selectedGuideResponses.find((response) => {
+      if (response.participantName !== participantName) {
+        return false;
+      }
+
+      const responseEvent = selectedGuide.events.find((eventItem) => eventItem.id === response.eventId);
+      const targetScore = getResponseAnswerByKeyOrLabel(responseEvent, response, "targetScore", [
+        "목표",
+      ]);
+      const targetScoreText = Array.isArray(targetScore) ? targetScore[0] : targetScore;
+
+      return Boolean(targetScoreText);
+    });
+    const targetResponseEvent = selectedGuide.events.find(
+      (eventItem) => eventItem.id === targetResponse?.eventId,
+    );
+    const targetScore = targetResponse
+      ? getResponseAnswerByKeyOrLabel(targetResponseEvent, targetResponse, "targetScore", ["목표"])
+      : undefined;
+    const targetScoreText = Array.isArray(targetScore) ? targetScore[0] : targetScore;
+
+    return targetScoreText ? `목표점수 ${targetScoreText}` : "목표점수 -";
+  };
+  const getKnownParticipantNames = () =>
+    new Set([
+      ...participants.map((participant) => participant.name),
+      ...selectedGuideResponses.map((response) => response.participantName),
+    ]);
+  const getTeamMemberWarnings = (
+    event: EventItem,
+    teamId: string | undefined,
+    membersText: string,
+  ) => {
+    const parsedMembers = parseMemberNames(membersText);
+    const knownNames = getKnownParticipantNames();
+    const seenNames = new Set<string>();
+    const warnings: string[] = [];
+
+    parsedMembers.forEach((member) => {
+      if (seenNames.has(member)) {
+        warnings.push(`${member}님이 같은 조에 중복 입력되었습니다.`);
+      }
+      seenNames.add(member);
+
+      const assignedTeam = event.teams.find(
+        (team) => team.id !== teamId && team.members.includes(member),
+      );
+
+      if (assignedTeam) {
+        warnings.push(`${member}님은 이미 ${assignedTeam.name}에 배정되어 있습니다.`);
+      }
+
+      if (!knownNames.has(member)) {
+        warnings.push(`${member}님은 현재 응답자 목록에 없습니다. 이름 오타인지 확인해주세요.`);
+      }
+    });
+
+    return Array.from(new Set(warnings));
+  };
+  const confirmTeamMemberWarnings = (
+    event: EventItem,
+    teamId: string | undefined,
+    membersText: string,
+  ) => {
+    const warnings = getTeamMemberWarnings(event, teamId, membersText);
+
+    if (!warnings.length) {
+      return true;
+    }
+
+    return window.confirm(`${warnings.join("\n")}\n\n그래도 저장하시겠습니까?`);
+  };
   const closeResponseManageModal = () => {
     setResponseManageEventId(undefined);
     setResponseManageTab("summary");
@@ -2829,6 +3008,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
           description="이벤트 기본 정보만 수정합니다. 설문과 조 배치 관리는 기존 패널에서 유지됩니다."
           onClose={() => setEventEditDraft(null)}
         >
+          {(() => {
+            const isBowlingEventDraft =
+              eventEditDraft.type === "event" &&
+              (eventEditDraft.eventKind === "bowling" || eventEditDraft.title.includes("볼링"));
+
+            return (
           <form className="space-y-4" onSubmit={handleSaveEventEdit}>
             <div className="grid gap-3 md:grid-cols-2">
               <label>
@@ -2841,25 +3026,47 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   value={eventEditDraft.title}
                 />
               </label>
-              <label>
-                <span className={labelClass}>상태</span>
-                <select
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setEventEditDraft({
-                      ...eventEditDraft,
-                      status: event.target.value as EventStatus,
-                    })
-                  }
-                  value={eventEditDraft.status}
-                >
-                  {Object.entries(eventStatusLabels).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {isBowlingEventDraft ? (
+                <label>
+                  <span className={labelClass}>볼링 진행 단계</span>
+                  <select
+                    className={fieldClass}
+                    onChange={(event) =>
+                      setEventEditDraft({
+                        ...eventEditDraft,
+                        phase: event.target.value as EventPhase,
+                      })
+                    }
+                    value={eventEditDraft.phase}
+                  >
+                    {Object.entries(eventPhaseLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  <span className={labelClass}>상태</span>
+                  <select
+                    className={fieldClass}
+                    onChange={(event) =>
+                      setEventEditDraft({
+                        ...eventEditDraft,
+                        status: event.target.value as EventStatus,
+                      })
+                    }
+                    value={eventEditDraft.status}
+                  >
+                    {Object.entries(eventStatusLabels).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label>
                 <span className={labelClass}>이벤트 타입</span>
                 <select
@@ -2887,8 +3094,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   ))}
                 </select>
               </label>
-              {eventEditDraft.type === "event" &&
-              (eventEditDraft.eventKind === "bowling" || eventEditDraft.title.includes("볼링")) ? (
+              {isBowlingEventDraft ? (
                 <label>
                   <span className={labelClass}>연결 설문</span>
                   <select
@@ -2992,6 +3198,8 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
               </Button>
             </div>
           </form>
+            );
+          })()}
         </AdminModal>
       ) : null}
 
@@ -3129,21 +3337,34 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         <span className={labelClass}>선택지</span>
                         <input
                           className={fieldClass}
-                          onChange={(inputEvent) =>
+                          onBlur={(inputEvent) => {
+                            const nextOptions = inputEvent.target.value
+                              .split(",")
+                              .map((option) => option.trim())
+                              .filter(Boolean);
+
                             updateSurveyQuestion(
                               selectedGuide.id,
                               surveyManageEvent.id,
                               question.id,
                               {
-                                options: inputEvent.target.value
-                                  .split(",")
-                                  .map((option) => option.trim())
-                                  .filter(Boolean),
+                                options: nextOptions,
                               },
-                            )
+                            );
+                            setQuestionOptionDrafts((currentDrafts) => {
+                              const nextDrafts = { ...currentDrafts };
+                              delete nextDrafts[question.id];
+                              return nextDrafts;
+                            });
+                          }}
+                          onChange={(inputEvent) =>
+                            setQuestionOptionDrafts({
+                              ...questionOptionDrafts,
+                              [question.id]: inputEvent.target.value,
+                            })
                           }
                           placeholder="옵션을 쉼표로 구분"
-                          value={question.options?.join(", ") ?? ""}
+                          value={questionOptionDrafts[question.id] ?? question.options?.join(", ") ?? ""}
                         />
                       </label>
                     ) : null}
@@ -3203,6 +3424,30 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
               membersText: "",
               memo: "",
             };
+            const isBowlingCompetitionManage =
+              responseManageEvent.type === "event" && responseManageEvent.eventKind === "bowling";
+            const linkedBowlingSurveyEvent = isBowlingCompetitionManage
+              ? selectedGuide.events.find((eventItem) => eventItem.id === responseManageEvent.linkedSurveyId) ??
+                selectedGuide.events.find(
+                  (eventItem) =>
+                    eventItem.type === "survey" && eventItem.surveyKind === "bowlingLevel",
+                )
+              : undefined;
+            const linkedBowlingSurveyResponses = linkedBowlingSurveyEvent
+              ? selectedGuideResponses.filter(
+                  (response) => response.eventId === linkedBowlingSurveyEvent.id,
+                )
+              : [];
+            const bowlingTeamSourceEvent = linkedBowlingSurveyEvent ?? responseManageEvent;
+            const bowlingRankings = isBowlingCompetitionManage
+              ? getBowlingTeamRankings(
+                  bowlingTeamSourceEvent,
+                  responseManageEventResponses,
+                  linkedBowlingSurveyEvent
+                    ? linkedBowlingSurveyResponses
+                    : responseManageEventResponses,
+                ).filter((ranking) => ranking.submittedCount > 0 || ranking.totalScore > 0)
+              : [];
 
             return (
               <div className="space-y-5">
@@ -3285,10 +3530,61 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                   </span>
                                 </div>
                                 <div className="mt-2 grid gap-1 text-xs leading-5 text-gray-600 sm:grid-cols-2">
-                                  <span>목표점수: {formatAnswerValue(response.answers.targetScore ?? "-")}</span>
-                                  <span>실력: {formatAnswerValue(response.answers.level ?? "-")}</span>
-                                  <span>경험: {formatAnswerValue(response.answers.experience ?? "-")}</span>
-                                  <span>커브/스핀: {formatAnswerValue(response.answers.curve ?? "-")}</span>
+                                  <span>
+                                    목표점수:{" "}
+                                    {formatAnswerValue(
+                                      getResponseAnswerByKeyOrLabel(
+                                        responseManageEvent,
+                                        response,
+                                        "targetScore",
+                                        ["목표"],
+                                      ) ?? "-",
+                                    )}
+                                  </span>
+                                  <span>
+                                    실력:{" "}
+                                    {formatAnswerValue(
+                                      getResponseAnswerByKeyOrLabel(
+                                        responseManageEvent,
+                                        response,
+                                        "level",
+                                        ["실력", "타입"],
+                                      ) ?? "-",
+                                    )}
+                                  </span>
+                                  <span>
+                                    경험:{" "}
+                                    {formatAnswerValue(
+                                      getResponseAnswerByKeyOrLabel(
+                                        responseManageEvent,
+                                        response,
+                                        "experience",
+                                        ["경험"],
+                                      ) ?? "-",
+                                    )}
+                                  </span>
+                                  <span>
+                                    스타일:{" "}
+                                    {formatAnswerValue(
+                                      getResponseAnswerByKeyOrLabel(
+                                        responseManageEvent,
+                                        response,
+                                        "style",
+                                        ["스타일", "커브", "스핀"],
+                                      ) ?? "-",
+                                    )}
+                                  </span>
+                                  <span className="sm:col-span-2">
+                                    중요하게 생각하는 것:{" "}
+                                    {formatAnswerValue(
+                                      getResponseAnswerByKeyOrLabel(
+                                        responseManageEvent,
+                                        response,
+                                        "priority",
+                                        ["중요"],
+                                      ) ?? "-",
+                                    )}
+                                  </span>
                                   <span className="sm:col-span-2">
                                     평균점수: {formatAnswerValue(response.answers.averageScore ?? "-")}
                                   </span>
@@ -3306,7 +3602,29 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
                     {responseManageEvent.type === "event" &&
                     responseManageEvent.eventKind === "bowling" ? (
-                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      <div className="mt-3 space-y-3">
+                        <section className="rounded-lg border border-brand-100 bg-brand-50 p-3">
+                          <h4 className="font-bold text-brand-950">
+                            볼링대회 조 배치는 연결된 볼링 레벨 테스트에서 관리합니다.
+                          </h4>
+                          <p className="mt-1 text-sm leading-5 text-brand-900">
+                            이 화면은 볼링대회 점수 제출 현황을 확인합니다. 조 목록과 목표점수는{" "}
+                            {linkedBowlingSurveyEvent?.title ?? "연결 설문"} 데이터를 기준으로 집계합니다.
+                          </p>
+                          {linkedBowlingSurveyEvent ? (
+                            <Button
+                              className="mt-3"
+                              onClick={() => {
+                                setResponseManageEventId(linkedBowlingSurveyEvent.id);
+                                setResponseManageTab("teams");
+                              }}
+                              variant="secondary"
+                            >
+                              연결 설문 조배치 관리 열기
+                            </Button>
+                          ) : null}
+                        </section>
+                      <div className="grid gap-3 lg:grid-cols-2">
                         <section className="rounded-lg border border-gray-200 bg-white p-3">
                           <h4 className="font-bold text-gray-950">점수 제출 현황</h4>
                           <div className="mt-3 space-y-2">
@@ -3314,18 +3632,51 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                               responseManageEventResponses.map((response) => {
                                 const game1Score = getNumericResponseAnswer(response, "game1Score");
                                 const game2Score = getNumericResponseAnswer(response, "game2Score");
+                                const totalScore = getParticipantScoreTotal(response);
+                                const levelResponse = linkedBowlingSurveyEvent
+                                  ? findParticipantResponse(linkedBowlingSurveyResponses, response)
+                                  : undefined;
+                                const targetScoreValue = levelResponse
+                                  ? getResponseAnswerByKeyOrLabel(
+                                      linkedBowlingSurveyEvent,
+                                      levelResponse,
+                                      "targetScore",
+                                      ["목표"],
+                                    )
+                                  : undefined;
+                                const targetScoreText = Array.isArray(targetScoreValue)
+                                  ? targetScoreValue[0]
+                                  : targetScoreValue;
+                                const targetScoreNumber = Number(targetScoreText);
+                                const targetScore =
+                                  Number.isFinite(targetScoreNumber) && targetScoreText !== ""
+                                    ? targetScoreNumber
+                                    : undefined;
+                                const assignedTeam = levelResponse
+                                  ? getEventResponseTeam(bowlingTeamSourceEvent, levelResponse)
+                                  : getEventResponseTeam(bowlingTeamSourceEvent, response);
 
                                 return (
                                   <div
-                                    className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-2 text-sm"
+                                    className="rounded-lg bg-gray-50 p-3 text-sm"
                                     key={response.id}
                                   >
-                                    <span className="font-bold text-gray-950">
-                                      {response.participantName}
-                                    </span>
-                                    <span className="text-xs font-semibold text-gray-600">
-                                      1G {game1Score ?? "-"} / 2G {game2Score ?? "-"}
-                                    </span>
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="font-bold text-gray-950">
+                                        {response.participantName}
+                                      </span>
+                                      <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-brand-700 ring-1 ring-brand-100">
+                                        {assignedTeam?.name ?? "미배정"}
+                                      </span>
+                                    </div>
+                                    <div className="mt-2 grid gap-1 text-xs leading-5 text-gray-600 sm:grid-cols-2">
+                                      <span>1R 점수: {game1Score ?? "-"}</span>
+                                      <span>2R 점수: {game2Score ?? "-"}</span>
+                                      <span>개인 총점: {totalScore}점</span>
+                                      <span>목표점수: {targetScore ?? "-"}</span>
+                                      <span>1R 차이: {formatTargetDiff(game1Score, targetScore)}</span>
+                                      <span>2R 차이: {formatTargetDiff(game2Score, targetScore)}</span>
+                                    </div>
                                   </div>
                                 );
                               })
@@ -3340,14 +3691,8 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         <section className="rounded-lg border border-gray-200 bg-white p-3">
                           <h4 className="font-bold text-gray-950">조별 합산 순위</h4>
                           <div className="mt-3 space-y-2">
-                            {getBowlingTeamRankings(
-                              responseManageEvent,
-                              responseManageEventResponses,
-                            ).length > 0 ? (
-                              getBowlingTeamRankings(
-                                responseManageEvent,
-                                responseManageEventResponses,
-                              ).map((ranking, index) => (
+                            {bowlingRankings.length > 0 ? (
+                              bowlingRankings.map((ranking, index) => (
                                 <div
                                   className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-2 text-sm"
                                   key={ranking.team.id}
@@ -3367,6 +3712,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             )}
                           </div>
                         </section>
+                      </div>
                       </div>
                     ) : null}
 
@@ -3525,6 +3871,22 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                     </span>
                   </div>
 
+                  {isBowlingCompetitionManage ? (
+                    <p className="mt-3 rounded-lg bg-brand-50 p-3 text-sm font-semibold leading-5 text-brand-900">
+                      볼링대회 조 배치는 연결된 볼링 레벨 테스트에서 관리합니다.
+                      {linkedBowlingSurveyEvent
+                        ? " 조 선택을 수정하려면 연결 설문 조배치 관리로 이동해주세요."
+                        : " 연결 설문을 먼저 설정해주세요."}
+                    </p>
+                  ) : responseManageEvent.requiresTeamAssignment ? (
+                    <p className="mt-3 rounded-lg bg-brand-50 p-3 text-sm font-semibold leading-5 text-brand-900">
+                      조 추가/수정은 조 배치 탭에서 할 수 있습니다.
+                      {responseManageEvent.teams.length === 0
+                        ? " 먼저 조 배치 탭에서 조를 추가해주세요."
+                        : " 아래 조 선택은 조 배치 탭의 조 목록을 기준으로 합니다."}
+                    </p>
+                  ) : null}
+
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     {responseManageEventResponses.length > 0 ? (
                       responseManageEventResponses.map((response) => {
@@ -3579,11 +3941,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                               )}
                             </div>
 
-                            {responseManageEvent.requiresTeamAssignment ? (
+                            {responseManageEvent.requiresTeamAssignment && !isBowlingCompetitionManage ? (
                               <label className="mt-3 block">
                                 <span className={labelClass}>조 선택</span>
                                 <select
                                   className={fieldClass}
+                                  disabled={responseManageEvent.teams.length === 0}
                                   onChange={(selectEvent) =>
                                     assignEventResponseTeam(
                                       selectedGuide.id,
@@ -3594,7 +3957,11 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                   }
                                   value={assignedTeam?.id ?? ""}
                                 >
-                                  <option value="">미배정</option>
+                                  <option value="">
+                                    {responseManageEvent.teams.length === 0
+                                      ? "먼저 조를 추가해주세요"
+                                      : "미배정"}
+                                  </option>
                                   {responseManageEvent.teams.map((team) => (
                                     <option key={team.id} value={team.id}>
                                       {team.name}
@@ -3617,7 +3984,53 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
                 {responseManageEvent.requiresTeamAssignment && responseManageTab === "teams" ? (
                   <section className="border-t border-gray-100 pt-4">
-                    <h3 className="font-bold text-gray-950">조 배치 관리</h3>
+                    {isBowlingCompetitionManage ? (
+                      <div className="rounded-lg border border-brand-100 bg-brand-50 p-3">
+                        <h3 className="font-bold text-brand-950">
+                          볼링대회 조 배치는 연결된 볼링 레벨 테스트에서 관리합니다.
+                        </h3>
+                        <p className="mt-1 text-sm leading-5 text-brand-900">
+                          이 이벤트 자체 조 목록은 사용하지 않습니다. 볼링페이지의 팀 멤버와 순위는{" "}
+                          {linkedBowlingSurveyEvent?.title ?? "연결 설문"} 조배정 데이터를 기준으로 표시됩니다.
+                        </p>
+                        {linkedBowlingSurveyEvent ? (
+                          <Button
+                            className="mt-3"
+                            onClick={() => {
+                              setResponseManageEventId(linkedBowlingSurveyEvent.id);
+                              setResponseManageTab("teams");
+                            }}
+                            variant="secondary"
+                          >
+                            연결 설문 조배치 관리 열기
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : (
+                    <>
+                    <h3 className="font-bold text-gray-950">조 목록 관리</h3>
+                    <p className="mt-1 text-sm leading-5 text-gray-500">
+                      여기에서 조를 추가/수정/삭제한 뒤, 응답 목록 탭에서 응답자별 조를 선택할 수 있습니다.
+                    </p>
+                    <div className="mt-3 rounded-lg bg-gray-50 p-3">
+                      <p className="text-sm font-bold text-gray-950">응답자 참고</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {responseManageEventResponses.length > 0 ? (
+                          responseManageEventResponses.map((response) => (
+                            <span
+                              className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200"
+                              key={response.id}
+                            >
+                              {response.participantName} / {getTargetScoreLabel(response.participantName)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-500">
+                            이 이벤트에 저장된 응답자가 없습니다.
+                          </span>
+                        )}
+                      </div>
+                    </div>
                     <div className="mt-3 grid gap-2 md:grid-cols-2">
                       <input
                         className={compactFieldClass}
@@ -3667,14 +4080,21 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             return;
                           }
 
+                          if (
+                            !confirmTeamMemberWarnings(
+                              responseManageEvent,
+                              undefined,
+                              groupDraft.membersText,
+                            )
+                          ) {
+                            return;
+                          }
+
                           addEventTeam(selectedGuide.id, responseManageEvent.id, {
                             id: createId("team"),
                             eventId: responseManageEvent.id,
                             name: groupDraft.teamName.trim(),
-                            members: groupDraft.membersText
-                              .split(",")
-                              .map((member) => member.trim())
-                              .filter(Boolean),
+                            members: parseMemberNames(groupDraft.membersText),
                             memo: groupDraft.memo.trim(),
                           });
                           setGroupDrafts({
@@ -3694,82 +4114,192 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
                     <div className="mt-3 space-y-2">
                       {responseManageEvent.teams.length > 0 ? (
-                        responseManageEvent.teams.map((team) => (
-                          <section
-                            className="rounded-lg border border-gray-100 bg-gray-50 p-3"
-                            key={team.id}
-                          >
-                            <div className="grid gap-2 md:grid-cols-2">
-                              <label>
-                                <span className={labelClass}>조 이름</span>
-                                <input
-                                  className={fieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      responseManageEvent.id,
-                                      team.id,
-                                      { name: inputEvent.target.value },
-                                    )
-                                  }
-                                  value={team.name}
-                                />
-                              </label>
-                              <label>
-                                <span className={labelClass}>메모</span>
-                                <input
-                                  className={fieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      responseManageEvent.id,
-                                      team.id,
-                                      { memo: inputEvent.target.value },
-                                    )
-                                  }
-                                  value={team.memo ?? ""}
-                                />
-                              </label>
-                              <label className="md:col-span-2">
-                                <span className={labelClass}>참가자</span>
-                                <input
-                                  className={fieldClass}
-                                  onChange={(inputEvent) =>
-                                    updateEventTeam(
-                                      selectedGuide.id,
-                                      responseManageEvent.id,
-                                      team.id,
-                                      {
-                                        members: inputEvent.target.value
-                                          .split(",")
-                                          .map((member) => member.trim())
-                                          .filter(Boolean),
-                                      },
-                                    )
-                                  }
-                                  value={team.members.join(", ")}
-                                />
-                              </label>
-                            </div>
-                            <div className="mt-3 flex justify-end">
-                              <Button
-                                icon={<Trash2 className="h-4 w-4" />}
-                                onClick={() =>
-                                  deleteEventTeam(selectedGuide.id, responseManageEvent.id, team.id)
-                                }
-                                variant="danger"
-                              >
-                                삭제
-                              </Button>
-                            </div>
-                          </section>
-                        ))
+                        responseManageEvent.teams.map((team) => {
+                          const teamEditDraft = teamEditDrafts[team.id];
+
+                          return (
+                            <section
+                              className="rounded-lg border border-gray-100 bg-gray-50 p-3"
+                              key={team.id}
+                            >
+                              {teamEditDraft ? (
+                                <>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    <label>
+                                      <span className={labelClass}>조 이름</span>
+                                      <input
+                                        className={fieldClass}
+                                        onChange={(inputEvent) =>
+                                          setTeamEditDrafts({
+                                            ...teamEditDrafts,
+                                            [team.id]: {
+                                              ...teamEditDraft,
+                                              teamName: inputEvent.target.value,
+                                            },
+                                          })
+                                        }
+                                        value={teamEditDraft.teamName}
+                                      />
+                                    </label>
+                                    <label>
+                                      <span className={labelClass}>메모</span>
+                                      <input
+                                        className={fieldClass}
+                                        onChange={(inputEvent) =>
+                                          setTeamEditDrafts({
+                                            ...teamEditDrafts,
+                                            [team.id]: {
+                                              ...teamEditDraft,
+                                              memo: inputEvent.target.value,
+                                            },
+                                          })
+                                        }
+                                        value={teamEditDraft.memo}
+                                      />
+                                    </label>
+                                    <label className="md:col-span-2">
+                                      <span className={labelClass}>참가자</span>
+                                      <input
+                                        className={fieldClass}
+                                        onChange={(inputEvent) =>
+                                          setTeamEditDrafts({
+                                            ...teamEditDrafts,
+                                            [team.id]: {
+                                              ...teamEditDraft,
+                                              membersText: inputEvent.target.value,
+                                            },
+                                          })
+                                        }
+                                        value={teamEditDraft.membersText}
+                                      />
+                                    </label>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                    <Button
+                                      onClick={() =>
+                                        setTeamEditDrafts((currentDrafts) => {
+                                          const nextDrafts = { ...currentDrafts };
+                                          delete nextDrafts[team.id];
+                                          return nextDrafts;
+                                        })
+                                      }
+                                      variant="secondary"
+                                    >
+                                      취소
+                                    </Button>
+                                    <Button
+                                      onClick={() => {
+                                        if (!teamEditDraft.teamName.trim()) {
+                                          return;
+                                        }
+
+                                        if (
+                                          !confirmTeamMemberWarnings(
+                                            responseManageEvent,
+                                            team.id,
+                                            teamEditDraft.membersText,
+                                          )
+                                        ) {
+                                          return;
+                                        }
+
+                                        updateEventTeam(
+                                          selectedGuide.id,
+                                          responseManageEvent.id,
+                                          team.id,
+                                          {
+                                            name: teamEditDraft.teamName.trim(),
+                                            members: parseMemberNames(teamEditDraft.membersText),
+                                            memo: teamEditDraft.memo.trim(),
+                                          },
+                                        );
+                                        setTeamEditDrafts((currentDrafts) => {
+                                          const nextDrafts = { ...currentDrafts };
+                                          delete nextDrafts[team.id];
+                                          return nextDrafts;
+                                        });
+                                      }}
+                                    >
+                                      저장
+                                    </Button>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div>
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div>
+                                        <p className="font-bold text-gray-950">{team.name}</p>
+                                        {team.memo ? (
+                                          <p className="mt-1 text-xs font-semibold text-gray-500">
+                                            {team.memo}
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                      <span className="rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-600 ring-1 ring-gray-200">
+                                        {team.members.length}명
+                                      </span>
+                                    </div>
+                                    <div className="mt-3 flex flex-wrap gap-1.5">
+                                      {team.members.length > 0 ? (
+                                        team.members.map((member) => (
+                                          <span
+                                            className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200"
+                                            key={member}
+                                          >
+                                            {member} / {getTargetScoreLabel(member)}
+                                          </span>
+                                        ))
+                                      ) : (
+                                        <span className="text-sm text-gray-500">
+                                          배정된 조원이 없습니다.
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                                    <Button
+                                      onClick={() =>
+                                        setTeamEditDrafts({
+                                          ...teamEditDrafts,
+                                          [team.id]: {
+                                            teamName: team.name,
+                                            membersText: team.members.join(", "),
+                                            memo: team.memo ?? "",
+                                          },
+                                        })
+                                      }
+                                      variant="secondary"
+                                    >
+                                      수정
+                                    </Button>
+                                    <Button
+                                      icon={<Trash2 className="h-4 w-4" />}
+                                      onClick={() =>
+                                        deleteEventTeam(
+                                          selectedGuide.id,
+                                          responseManageEvent.id,
+                                          team.id,
+                                        )
+                                      }
+                                      variant="danger"
+                                    >
+                                      삭제
+                                    </Button>
+                                  </div>
+                                </>
+                              )}
+                            </section>
+                          );
+                        })
                       ) : (
                         <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
                           생성된 조가 없습니다.
                         </p>
                       )}
                     </div>
+                    </>
+                    )}
                   </section>
                 ) : null}
               </div>

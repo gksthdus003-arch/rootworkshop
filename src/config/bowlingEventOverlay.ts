@@ -3,19 +3,13 @@ export type BowlingOverlayRect = {
   top: string;
   width: string;
   height: string;
+  fontSize?: string;
 };
 
 export type BowlingOverlayPoint = {
   left: string;
   top: string;
   width?: string;
-};
-
-export type BowlingRankingRowOverlay = {
-  rank: BowlingOverlayRect;
-  team: BowlingOverlayRect;
-  score: BowlingOverlayRect;
-  members: BowlingOverlayRect;
 };
 
 export const bowlingEventBoard = {
@@ -25,48 +19,52 @@ export const bowlingEventBoard = {
 };
 
 export const bowlingEventOverlay = {
-  targetScore: { left: "29.5%", top: "7%", width: "47%", height: "5.2%" },
+  targetScore: { left: "26.5%", top: "7%", width: "47%", height: "5.2%" },
   levelTestButton: { left: "23.2%", top: "14.25%", width: "53.8%", height: "2.9%" },
   teamMembers: { left: "14.2%", top: "22%", width: "71.6%", height: "4.1%" },
-  scoreInputButton: { left: "27%", top: "34.3%", width: "46%", height: "2.8%" },
-  game1Score: { left: "17.2%", top: "42.15%", width: "23.8%", height: "4.9%" },
-  game2Score: { left: "56.1%", top: "42.15%", width: "23.8%", height: "4.9%" },
-  game1Diff: { left: "20.4%", top: "48.55%", width: "18.5%", height: "1.6%" },
-  game2Diff: { left: "59.5%", top: "48.55%", width: "18.5%", height: "1.6%" },
-  teamRankMessage: { left: "14.2%", top: "64.35%", width: "71.7%", height: "2.55%" },
+  scoreInputButton: { left: "27%", top: "36.1%", width: "46%", height: "3%" },
+  game1Score: {
+    left: "20%",
+    top: "45.5%",
+    width: "23.8%",
+    height: "4.9%",
+    fontSize: "clamp(45px, 12vw, 76px)",
+  },
+  game2Score: {
+    left: "57.3%",
+    top: "45.5%",
+    width: "23.8%",
+    height: "4.9%",
+    fontSize: "clamp(45px, 12vw, 76px)",
+  },
+  game1Diff: {
+    left: "23.5%",
+    top: "51%",
+    width: "27%",
+    height: "2.1%",
+    fontSize: "clamp(25px, 2.9vw, 16px)",
+  },
+  game2Diff: {
+    left: "61.5%",
+    top: "51%",
+    width: "27%",
+    height: "2.1%",
+    fontSize: "clamp(25px, 2.9vw, 16px)",
+  },
+  teamRankMessage: {
+    left: "14.2%",
+    top: "64.35%",
+    width: "71.7%",
+    height: "2.55%",
+    fontSize: "clamp(13px, 3vw, 19px)",
+  },
+  rankingTable: {
+    left: "13.6%",
+    top: "67.45%",
+    width: "72.8%",
+    height: "15.8%",
+    fontSize: "clamp(10px, 2.35vw, 14px)",
+  },
   scoreBlur: { left: "9%", top: "29.2%", width: "82%", height: "23.6%" },
   rankingBlur: { left: "9%", top: "54.9%", width: "82%", height: "31.2%" },
 };
-
-export const bowlingRankingRows: BowlingRankingRowOverlay[] = [
-  {
-    rank: { left: "14.2%", top: "64.5%", width: "9.5%", height: "2.2%" },
-    team: { left: "24.2%", top: "64.5%", width: "15%", height: "2.2%" },
-    score: { left: "40.4%", top: "64.5%", width: "16.6%", height: "2.2%" },
-    members: { left: "58%", top: "64.5%", width: "28%", height: "2.2%" },
-  },
-  {
-    rank: { left: "14.2%", top: "67.35%", width: "9.5%", height: "2.2%" },
-    team: { left: "24.2%", top: "67.35%", width: "15%", height: "2.2%" },
-    score: { left: "40.4%", top: "67.35%", width: "16.6%", height: "2.2%" },
-    members: { left: "58%", top: "67.35%", width: "28%", height: "2.2%" },
-  },
-  {
-    rank: { left: "14.2%", top: "70.2%", width: "9.5%", height: "2.2%" },
-    team: { left: "24.2%", top: "70.2%", width: "15%", height: "2.2%" },
-    score: { left: "40.4%", top: "70.2%", width: "16.6%", height: "2.2%" },
-    members: { left: "58%", top: "70.2%", width: "28%", height: "2.2%" },
-  },
-  {
-    rank: { left: "14.2%", top: "73.05%", width: "9.5%", height: "2.2%" },
-    team: { left: "24.2%", top: "73.05%", width: "15%", height: "2.2%" },
-    score: { left: "40.4%", top: "73.05%", width: "16.6%", height: "2.2%" },
-    members: { left: "58%", top: "73.05%", width: "28%", height: "2.2%" },
-  },
-  {
-    rank: { left: "14.2%", top: "75.9%", width: "9.5%", height: "2.2%" },
-    team: { left: "24.2%", top: "75.9%", width: "15%", height: "2.2%" },
-    score: { left: "40.4%", top: "75.9%", width: "16.6%", height: "2.2%" },
-    members: { left: "58%", top: "75.9%", width: "28%", height: "2.2%" },
-  },
-];

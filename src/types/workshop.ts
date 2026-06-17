@@ -139,7 +139,7 @@ export interface EventSurveyResponse {
   participantName: string;
   submittedAt: string;
   assignedTeamId?: string;
-  answers: Record<string, string | string[]>;
+  answers: Record<string, string | string[] | number>;
 }
 
 export interface PosterConfig {
