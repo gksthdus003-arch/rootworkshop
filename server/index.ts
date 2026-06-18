@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { ensureSchema } from "./schema";
+import { seedIfEmpty } from "./seed";
 
 const app = express();
 app.use(cors());
@@ -14,6 +15,7 @@ const PORT = Number(process.env.PORT ?? 4000);
 
 const start = async () => {
   await ensureSchema();
+  await seedIfEmpty();
   app.listen(PORT, () => {
     console.log(`[server] listening on http://localhost:${PORT}`);
   });
