@@ -5,6 +5,7 @@ node_modules
 dist
 .env
 .env.local
+server/.env
 .DS_Store
 npm-debug.log*
 pnpm-debug.log*
