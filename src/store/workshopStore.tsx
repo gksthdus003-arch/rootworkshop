@@ -2,10 +2,11 @@ import {
   createContext,
   type PropsWithChildren,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
-import { mockWorkshopRepository } from "../services/workshopRepository";
+import { clientState, workshopApi } from "../services/workshopRepository";
 import type {
   AnnouncementItem,
   BottomTabId,
@@ -102,9 +103,9 @@ interface WorkshopStoreValue {
   ) => void;
   deleteAnnouncement: (guideId: string, announcementId: string) => void;
   saveEventResponse: (response: EventSurveyResponse) => void;
-  unlockAdmin: (password: string) => boolean;
+  unlockAdmin: (password: string) => Promise<boolean>;
   lockAdmin: () => void;
-  changeAdminPassword: (password: string) => void;
+  changeAdminPassword: (password: string) => Promise<void>;
 }
 
 const WorkshopStoreContext = createContext<WorkshopStoreValue | null>(null);
@@ -129,28 +130,64 @@ const getInitialActiveTab = (): BottomTabId => {
 };
 
 export const WorkshopProvider = ({ children }: PropsWithChildren) => {
-  const [guides, setGuides] = useState(() => mockWorkshopRepository.listGuides());
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [guides, setGuides] = useState<WorkshopGuide[]>([]);
   const defaultGuide = useMemo(
-    () => guides.find((guide) => guide.isDefault) ?? guides[0] ?? mockWorkshopRepository.getDefaultGuide(),
+    () => guides.find((guide) => guide.isDefault) ?? guides[0],
     [guides],
   );
   const [selectedGuideId, setSelectedGuideId] = useState(() =>
-    mockWorkshopRepository.getSelectedGuideId(defaultGuide.id),
+    clientState.getSelectedGuideId(""),
   );
   const [participantProfile, setParticipantProfile] = useState<ParticipantProfile | undefined>(() =>
-    mockWorkshopRepository.getParticipantProfile(),
+    clientState.getParticipantProfile(),
   );
   const [activeTab, setActiveTab] = useState<BottomTabId>(() => getInitialActiveTab());
   const [scheduleFocusRequestId, setScheduleFocusRequestId] = useState(0);
-  const [participants, setParticipants] = useState(() =>
-    mockWorkshopRepository.listParticipants(),
-  );
-  const [eventResponses, setEventResponses] = useState(() =>
-    mockWorkshopRepository.listEventResponses(),
-  );
+  const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
+  const [eventResponses, setEventResponses] = useState<EventSurveyResponse[]>([]);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(() =>
-    mockWorkshopRepository.isAdminUnlocked(),
+    clientState.isAdminUnlocked(),
   );
+
+  // Load shared data from the server on mount.
+  useEffect(() => {
+    let cancelled = false;
+
+    void Promise.all([
+      workshopApi.listGuides(),
+      workshopApi.listParticipants(),
+      workshopApi.listEventResponses(),
+    ])
+      .then(([loadedGuides, loadedParticipants, loadedResponses]) => {
+        if (cancelled) {
+          return;
+        }
+
+        setGuides(loadedGuides);
+        setParticipants(loadedParticipants);
+        setEventResponses(loadedResponses);
+        setSelectedGuideId((current) => {
+          if (current && loadedGuides.some((guide) => guide.id === current)) {
+            return current;
+          }
+
+          return (
+            loadedGuides.find((guide) => guide.isDefault)?.id ??
+            loadedGuides[0]?.id ??
+            current
+          );
+        });
+        setIsLoaded(true);
+      })
+      .catch((error) => {
+        console.error("[workshop] failed to load data", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const selectedGuide = useMemo(
     () => guides.find((guide) => guide.id === selectedGuideId) ?? defaultGuide,
@@ -160,7 +197,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
   const value = useMemo<WorkshopStoreValue>(() => {
     const saveGuides = (nextGuides: WorkshopGuide[]) => {
       setGuides(nextGuides);
-      mockWorkshopRepository.saveGuides(nextGuides);
+      void workshopApi.saveGuides(nextGuides);
     };
 
     const updateGuideById = (
@@ -172,7 +209,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
 
     const selectGuide = (guideId: string) => {
       setSelectedGuideId(guideId);
-      mockWorkshopRepository.saveSelectedGuideId(guideId);
+      clientState.saveSelectedGuideId(guideId);
     };
 
     const saveParticipantName = (name: string) => {
@@ -183,16 +220,19 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       };
 
       setParticipantProfile(profile);
-      mockWorkshopRepository.saveParticipantProfile(profile);
-      setParticipants(mockWorkshopRepository.listParticipants());
+      clientState.saveParticipantProfile(profile);
+      void workshopApi
+        .saveParticipantProfile(profile)
+        .then((nextParticipants) => setParticipants(nextParticipants))
+        .catch((error) => console.error("[workshop] save participant failed", error));
     };
 
-    const unlockAdmin = (password: string) => {
-      const isMatched = mockWorkshopRepository.verifyAdminPassword(password);
+    const unlockAdmin = async (password: string) => {
+      const isMatched = await workshopApi.verifyAdminPassword(password);
 
       if (isMatched) {
         setIsAdminUnlocked(true);
-        mockWorkshopRepository.setAdminUnlocked(true);
+        clientState.setAdminUnlocked(true);
       }
 
       return isMatched;
@@ -200,7 +240,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
 
     const lockAdmin = () => {
       setIsAdminUnlocked(false);
-      mockWorkshopRepository.setAdminUnlocked(false);
+      clientState.setAdminUnlocked(false);
     };
 
     const openScheduleTab = () => {
@@ -249,7 +289,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
         : nextGuides.find((guide) => guide.isDefault)?.id ?? nextGuides[0].id;
 
       setSelectedGuideId(nextSelectedGuideId);
-      mockWorkshopRepository.saveSelectedGuideId(nextSelectedGuideId);
+      clientState.saveSelectedGuideId(nextSelectedGuideId);
       saveGuides(nextGuides);
     };
 
@@ -486,7 +526,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
           };
         });
 
-        mockWorkshopRepository.saveEventResponses(nextResponses);
+        void workshopApi.saveEventResponses(nextResponses);
         return nextResponses;
       });
     };
@@ -601,7 +641,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
             : response,
         );
 
-        mockWorkshopRepository.saveEventResponses(nextResponses);
+        void workshopApi.saveEventResponses(nextResponses);
         return nextResponses;
       });
     };
@@ -681,11 +721,11 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
 
         return [...nextResponses, response];
       });
-      mockWorkshopRepository.saveEventResponse(response);
+      void workshopApi.saveEventResponse(response);
     };
 
-    const changeAdminPassword = (password: string) => {
-      mockWorkshopRepository.setAdminPassword(password);
+    const changeAdminPassword = async (password: string) => {
+      await workshopApi.setAdminPassword(password);
     };
 
     return {
@@ -749,6 +789,14 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     selectedGuide,
     selectedGuideId,
   ]);
+
+  if (!isLoaded || !defaultGuide) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-500">
+        불러오는 중…
+      </div>
+    );
+  }
 
   return <WorkshopStoreContext.Provider value={value}>{children}</WorkshopStoreContext.Provider>;
 };

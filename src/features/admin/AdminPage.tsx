@@ -847,10 +847,10 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     });
   };
 
-  const handleLogin = (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const isUnlocked = unlockAdmin(password);
+    const isUnlocked = await unlockAdmin(password);
     setErrorMessage(isUnlocked ? "" : "비밀번호를 확인해 주세요.");
   };
 
@@ -1251,7 +1251,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     );
   };
 
-  const handlePasswordChange = (event: FormEvent<HTMLFormElement>) => {
+  const handlePasswordChange = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!newPassword || newPassword !== newPasswordConfirm) {
@@ -1259,7 +1259,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       return;
     }
 
-    changeAdminPassword(newPassword);
+    await changeAdminPassword(newPassword);
     setNewPassword("");
     setNewPasswordConfirm("");
     setSettingsMessage("비밀번호가 변경되었습니다.");

@@ -1,450 +1,105 @@
-import { getDefaultGuide as getMockDefaultGuide, mockAdminConfig, mockWorkshopGuides } from "../data/mockData";
-import { inferMapLocationCategory } from "../lib/mapLocationCategories";
+// Thin async API client. All data shaping/normalization happens on the server.
 import { readFromStorage, storageKeys, writeToStorage } from "../lib/storage";
 import type {
-  AnnouncementItem,
   EventItem,
-  EventKind,
-  EventPhase,
-  EventStatus,
-  EventType,
-  EventTeam,
   EventSurveyResponse,
-  MapLocation,
   ParticipantProfile,
-  PosterConfig,
-  RecommendationItem,
-  SurveyKind,
-  SurveyQuestion,
   WorkshopGuide,
-  WorkshopStatus,
 } from "../types/workshop";
 
-export interface WorkshopRepository {
-  listGuides: () => WorkshopGuide[];
-  saveGuides: (guides: WorkshopGuide[]) => void;
-  getDefaultGuide: () => WorkshopGuide;
-  getParticipantProfile: () => ParticipantProfile | undefined;
-  saveParticipantProfile: (profile: ParticipantProfile) => void;
-  listParticipants: () => ParticipantProfile[];
-  getSelectedGuideId: (fallbackGuideId: string) => string;
-  saveSelectedGuideId: (guideId: string) => void;
-  isAdminUnlocked: () => boolean;
-  setAdminUnlocked: (isUnlocked: boolean) => void;
-  verifyAdminPassword: (password: string) => boolean;
-  setAdminPassword: (password: string) => void;
-  listEventResponses: () => EventSurveyResponse[];
-  saveEventResponses: (responses: EventSurveyResponse[]) => void;
-  saveEventResponse: (response: EventSurveyResponse) => void;
-  getEventOverrides: () => Record<string, EventItem[]>;
-  saveEventOverrides: (eventOverrides: Record<string, EventItem[]>) => void;
-}
+const API_BASE = "/api";
 
-const createId = (prefix: string) => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: init?.body ? { "content-type": "application/json" } : undefined,
+    ...init,
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText);
+    throw new Error(`API ${path} failed (${response.status}): ${message}`);
   }
 
-  return `${prefix}-${Date.now()}`;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
 };
 
-const validEventStatuses: EventStatus[] = ["waiting", "active", "closed"];
-const validSurveyKinds: SurveyKind[] = ["general", "activity", "transport", "bowlingLevel"];
-const validEventKinds: EventKind[] = ["general", "bowling", "preGuide"];
-const validEventPhases: EventPhase[] = ["preSurvey", "scoreInput", "result"];
-const validWorkshopStatuses: WorkshopStatus[] = ["pre", "live", "closed"];
+// ---------------------------------------------------------------------------
+// Shared data — backed by the MySQL server.
+// ---------------------------------------------------------------------------
+export const workshopApi = {
+  listGuides: () => request<WorkshopGuide[]>("/guides"),
+  saveGuides: (guides: WorkshopGuide[]) =>
+    request<WorkshopGuide[]>("/guides", {
+      method: "PUT",
+      body: JSON.stringify(guides),
+    }),
 
-const inferEventType = (event: EventItem): EventType => {
-  const rawType = (event as { type?: unknown }).type;
-  const legacyType = typeof rawType === "string" ? rawType : undefined;
-  const searchableText = `${event.id} ${event.title}`.toLowerCase();
+  listParticipants: () => request<ParticipantProfile[]>("/participants"),
+  saveParticipantProfile: (profile: ParticipantProfile) =>
+    request<ParticipantProfile[]>("/participants", {
+      method: "POST",
+      body: JSON.stringify(profile),
+    }),
 
-  if (legacyType === "survey" || legacyType === "event") {
-    return legacyType;
-  }
+  listEventResponses: () => request<EventSurveyResponse[]>("/event-responses"),
+  saveEventResponses: (responses: EventSurveyResponse[]) =>
+    request<EventSurveyResponse[]>("/event-responses", {
+      method: "PUT",
+      body: JSON.stringify(responses),
+    }),
+  saveEventResponse: (response: EventSurveyResponse) =>
+    request<EventSurveyResponse>("/event-responses", {
+      method: "POST",
+      body: JSON.stringify(response),
+    }),
 
-  if (legacyType === "activity") {
-    return "survey";
-  }
+  getEventOverrides: () =>
+    request<Record<string, EventItem[]>>("/event-overrides"),
+  saveEventOverrides: (eventOverrides: Record<string, EventItem[]>) =>
+    request<Record<string, EventItem[]>>("/event-overrides", {
+      method: "PUT",
+      body: JSON.stringify(eventOverrides),
+    }),
 
-  if (legacyType === "bowling") {
-    return searchableText.includes("level") || searchableText.includes("레벨 테스트")
-      ? "survey"
-      : "event";
-  }
-
-  if (searchableText.includes("대회") || searchableText.includes("game-board")) {
-    return "event";
-  }
-
-  return "survey";
-};
-
-const inferSurveyKind = (event: EventItem, type: EventType): SurveyKind | undefined => {
-  if (event.surveyKind && validSurveyKinds.includes(event.surveyKind)) {
-    return event.surveyKind;
-  }
-
-  if (type !== "survey") {
-    return undefined;
-  }
-
-  const rawType = (event as { type?: unknown }).type;
-  const legacyType = typeof rawType === "string" ? rawType : undefined;
-  const searchableText = `${event.id} ${event.title}`.toLowerCase();
-
-  if (legacyType === "activity" || searchableText.includes("activity") || searchableText.includes("액티비티")) {
-    return "activity";
-  }
-
-  if (legacyType === "bowling" || searchableText.includes("bowling-level") || searchableText.includes("레벨 테스트")) {
-    return "bowlingLevel";
-  }
-
-  return "general";
-};
-
-const inferEventKind = (event: EventItem, type: EventType): EventKind | undefined => {
-  if (event.eventKind && validEventKinds.includes(event.eventKind)) {
-    return event.eventKind;
-  }
-
-  if (type !== "event") {
-    return undefined;
-  }
-
-  const rawType = (event as { type?: unknown }).type;
-  const legacyType = typeof rawType === "string" ? rawType : undefined;
-  const searchableText = `${event.id} ${event.title}`.toLowerCase();
-
-  if (legacyType === "bowling" || searchableText.includes("bowling") || searchableText.includes("볼링")) {
-    return "bowling";
-  }
-
-  if (searchableText.includes("pre-guide") || searchableText.includes("사전")) {
-    return "preGuide";
-  }
-
-  return "general";
-};
-
-const inferEventPhase = (event: EventItem, type: EventType): EventPhase | undefined => {
-  if (event.phase && validEventPhases.includes(event.phase)) {
-    return event.phase;
-  }
-
-  if (type !== "event" || inferEventKind(event, type) !== "bowling") {
-    return undefined;
-  }
-
-  if (event.status === "closed") {
-    return "result";
-  }
-
-  return "preSurvey";
-};
-
-const normalizePoster = (
-  poster: PosterConfig | undefined,
-  fallbackPoster?: PosterConfig,
-): PosterConfig => ({
-  enabled: poster?.enabled ?? fallbackPoster?.enabled ?? false,
-  imageUrl: poster?.imageUrl ?? fallbackPoster?.imageUrl ?? "",
-  version: poster?.version || fallbackPoster?.version || "poster-v1",
-  durationMs: Number.isFinite(poster?.durationMs)
-    ? Math.max(Number(poster?.durationMs), 500)
-    : fallbackPoster?.durationMs ?? 2000,
-  showOnPreFirstVisit:
-    poster?.showOnPreFirstVisit ?? fallbackPoster?.showOnPreFirstVisit ?? true,
-  showOnDay1FirstVisit:
-    poster?.showOnDay1FirstVisit ?? fallbackPoster?.showOnDay1FirstVisit ?? true,
-});
-
-const normalizeSurvey = (survey: SurveyQuestion[] | undefined): SurveyQuestion[] =>
-  Array.isArray(survey)
-    ? survey.map((question, index) => ({
-        id: question.id || `question-${index + 1}`,
-        type: question.type || "shortText",
-        label: question.label || "문항",
-        description: question.description,
-        required: question.required ?? false,
-        options: question.options ?? [],
-      }))
-    : [];
-
-const normalizeTeam = (team: EventTeam, eventId: string, index: number): EventTeam => ({
-  id: team.id || `${eventId}-team-${index + 1}`,
-  eventId: team.eventId || eventId,
-  name: team.name || `조 ${index + 1}`,
-  members: Array.isArray(team.members) ? team.members : [],
-  memo: team.memo ?? "",
-});
-
-const normalizeLegacyTeams = (event: EventItem) =>
-  Array.isArray(event.groupAssignments)
-    ? event.groupAssignments.map((groupAssignment, index) => ({
-        id: `${event.id || "event"}-legacy-team-${index + 1}`,
-        eventId: event.id || "",
-        name: groupAssignment.groupName,
-        members: groupAssignment.members,
-        memo: "",
-      }))
-    : [];
-
-const normalizeEvent = (event: EventItem, index: number, workshopId: string): EventItem => {
-  const eventId = event.id || `event-${index + 1}`;
-  const teams = Array.isArray(event.teams) && event.teams.length > 0
-    ? event.teams
-    : normalizeLegacyTeams(event);
-  const type = inferEventType(event);
-  const surveyKind = inferSurveyKind(event, type);
-  const eventKind = inferEventKind(event, type);
-
-  return {
-    id: eventId,
-    workshopId: event.workshopId || workshopId,
-    title: event.title || "이벤트",
-    description: event.description || "",
-    type,
-    surveyKind,
-    eventKind,
-    showInEventList: event.showInEventList ?? (surveyKind === "bowlingLevel" ? false : true),
-    linkedSurveyId: event.linkedSurveyId,
-    phase: inferEventPhase(event, type),
-    pageBackgroundImage: event.pageBackgroundImage,
-    themeImage: event.themeImage,
-    pageLayoutType: event.pageLayoutType,
-    status: validEventStatuses.includes(event.status) ? event.status : "waiting",
-    opensAt: event.opensAt || new Date().toISOString(),
-    closesAt: event.closesAt || new Date().toISOString(),
-    requiresTeamAssignment: event.requiresTeamAssignment ?? teams.length > 0,
-    survey: normalizeSurvey(event.survey),
-    resultSummary: event.resultSummary,
-    teams: teams.map((team, teamIndex) => normalizeTeam(team, eventId, teamIndex)),
-  };
-};
-
-const ensureDefault2026Events = (events: EventItem[], mockDefaultGuide?: WorkshopGuide) => {
-  const hasBowlingEvent = events.some(
-    (event) =>
-      event.id === "bowling-competition" ||
-      (event.type === "event" &&
-        (event.eventKind === "bowling" ||
-          event.title.includes("볼링대회") ||
-          event.title.includes("볼링 대회"))),
-  );
-
-  if (hasBowlingEvent) {
-    return events;
-  }
-
-  const mockBowlingEvent = mockDefaultGuide?.events.find(
-    (event) => event.id === "bowling-competition",
-  );
-
-  return mockBowlingEvent && mockDefaultGuide
-    ? [...events, normalizeEvent(mockBowlingEvent, events.length, mockDefaultGuide.id)]
-    : events;
-};
-
-const normalizeRecommendation = (
-  recommendation: RecommendationItem,
-  index: number,
-): RecommendationItem => ({
-  id: recommendation.id || `recommendation-${index + 1}`,
-  title: recommendation.title || "추천 코스",
-  description: recommendation.description || "",
-  category: recommendation.category || "추천",
-  locationLabel: recommendation.locationLabel || "위치 미정",
-  imageUrl: recommendation.imageUrl || "/assets/recommendation-eco-stream.png",
-  isVisible: recommendation.isVisible ?? true,
-});
-
-const normalizeAnnouncement = (
-  announcement: AnnouncementItem,
-  index: number,
-): AnnouncementItem => ({
-  id: announcement.id || `announcement-${index + 1}`,
-  title: announcement.title || "공지",
-  body: announcement.body || "",
-  isImportant: announcement.isImportant ?? false,
-  showOnHomeBanner: announcement.showOnHomeBanner ?? false,
-  createdAt: announcement.createdAt || new Date().toISOString(),
-});
-
-const normalizeMapLocation = (location: MapLocation, index: number): MapLocation => {
-  const normalizedLocation = {
-    id: location.id || `location-${index + 1}`,
-    name: location.name || "장소",
-    description: location.description ?? "",
-    category: location.category,
-    xPercent: Number.isFinite(location.xPercent) ? location.xPercent : 50,
-    yPercent: Number.isFinite(location.yPercent) ? location.yPercent : 50,
-    isWorkshopLocation: location.isWorkshopLocation ?? false,
-    isSmokingArea: location.isSmokingArea ?? false,
-  };
-
-  return {
-    ...normalizedLocation,
-    category:
-      normalizedLocation.category ??
-      inferMapLocationCategory({
-        id: normalizedLocation.id,
-        name: normalizedLocation.name,
-        isSmokingArea: normalizedLocation.isSmokingArea,
-      }),
-  };
-};
-
-const shouldUseDefault2026Schedule = (guide: WorkshopGuide) => guide.id === "workshop-2026";
-
-const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => {
-  const shouldUseMockSchedule = shouldUseDefault2026Schedule(guide);
-  const mockDefaultGuide = shouldUseMockSchedule ? getMockDefaultGuide() : undefined;
-  const fallbackStartDate = guide.schedule?.[0]?.startAt ?? new Date().toISOString();
-
-  return {
-    id: guide.id || createId("guide"),
-    round: guide.round || index + 1,
-    year: guide.year || new Date().getFullYear(),
-    title: guide.title || `${guide.year || new Date().getFullYear()} 워크숍 가이드`,
-    subtitle: guide.subtitle || "",
-    periodLabel: guide.periodLabel || "",
-    startDate: guide.startDate || mockDefaultGuide?.startDate || fallbackStartDate,
-    status: validWorkshopStatuses.includes(guide.status)
-      ? guide.status
-      : mockDefaultGuide?.status ?? "live",
-    locationLabel: guide.locationLabel || "",
-    preparationItems: Array.isArray(guide.preparationItems)
-      ? guide.preparationItems
-      : mockDefaultGuide?.preparationItems ?? [],
-    venueAddress: guide.venueAddress || mockDefaultGuide?.venueAddress || "",
-    transportationGuide:
-      guide.transportationGuide || mockDefaultGuide?.transportationGuide || "",
-    mapLinkUrl: guide.mapLinkUrl || mockDefaultGuide?.mapLinkUrl,
-    poster: normalizePoster(guide.poster, mockDefaultGuide?.poster),
-    isDefault: guide.isDefault ?? index === 0,
-    isPublished: guide.isPublished ?? true,
-    scheduleControl: shouldUseMockSchedule
-      ? mockDefaultGuide?.scheduleControl ?? {
-          mode: "auto",
-          manualCurrentScheduleId: undefined,
-        }
-      : guide.scheduleControl ?? {
-          mode: "auto",
-          manualCurrentScheduleId: undefined,
-        },
-    schedule: shouldUseMockSchedule
-      ? mockDefaultGuide?.schedule ?? []
-      : Array.isArray(guide.schedule)
-        ? guide.schedule
-        : [],
-    map: {
-      title: guide.map?.title || "워크숍 안내 지도",
-      imageUrl: guide.map?.imageUrl || "/assets/konjiam-map-base.png",
-      locations: Array.isArray(guide.map?.locations)
-        ? guide.map.locations.map((location, locationIndex) =>
-            normalizeMapLocation(location, locationIndex),
-          )
-        : [],
-    },
-    events: ensureDefault2026Events(
-      Array.isArray(guide.events)
-        ? guide.events.map((event, eventIndex) => normalizeEvent(event, eventIndex, guide.id))
-        : [],
-      mockDefaultGuide,
-    ),
-    recommendations: Array.isArray(guide.recommendations)
-      ? guide.recommendations.map((recommendation, recommendationIndex) =>
-          normalizeRecommendation(recommendation, recommendationIndex),
-        )
-      : [],
-    announcements: Array.isArray(guide.announcements)
-      ? guide.announcements.map((announcement, announcementIndex) =>
-          normalizeAnnouncement(announcement, announcementIndex),
-        )
-      : [],
-  };
-};
-
-const normalizeGuides = (guides: WorkshopGuide[]) => {
-  const normalizedGuides = guides.map((guide, index) => normalizeGuide(guide, index));
-
-  if (!normalizedGuides.length) {
-    return mockWorkshopGuides.map((guide, index) => normalizeGuide(guide, index));
-  }
-
-  const defaultIndex = normalizedGuides.findIndex((guide) => guide.isDefault);
-
-  return normalizedGuides.map((guide, index) => ({
-    ...guide,
-    isDefault: defaultIndex === -1 ? index === 0 : index === defaultIndex,
-  }));
-};
-
-const listStoredGuides = () => {
-  const storedGuides = readFromStorage<WorkshopGuide[] | undefined>(
-    storageKeys.guideOverrides,
-    undefined,
-  );
-
-  return normalizeGuides(storedGuides?.length ? storedGuides : mockWorkshopGuides);
-};
-
-export const mockWorkshopRepository: WorkshopRepository = {
-  listGuides: () => listStoredGuides(),
-  saveGuides: (guides) => {
-    writeToStorage(storageKeys.guideOverrides, normalizeGuides(guides));
+  verifyAdminPassword: async (password: string) => {
+    const { ok } = await request<{ ok: boolean }>("/admin/verify", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    return ok;
   },
-  getDefaultGuide: () =>
-    listStoredGuides().find((guide) => guide.isDefault) ?? getMockDefaultGuide(),
+  setAdminPassword: (password: string) =>
+    request<{ ok: boolean }>("/admin/password", {
+      method: "PUT",
+      body: JSON.stringify({ password }),
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Client-only state — stays in this browser's localStorage.
+// ---------------------------------------------------------------------------
+export const clientState = {
   getParticipantProfile: () =>
-    readFromStorage<ParticipantProfile | undefined>(storageKeys.participantProfile, undefined),
-  saveParticipantProfile: (profile) => {
+    readFromStorage<ParticipantProfile | undefined>(
+      storageKeys.participantProfile,
+      undefined,
+    ),
+  saveParticipantProfile: (profile: ParticipantProfile) => {
     writeToStorage(storageKeys.participantProfile, profile);
-
-    const participants = readFromStorage<ParticipantProfile[]>(storageKeys.participants, []);
-    const nextParticipants = participants.filter((participant) => participant.name !== profile.name);
-    writeToStorage(storageKeys.participants, [...nextParticipants, profile]);
   },
-  listParticipants: () => readFromStorage<ParticipantProfile[]>(storageKeys.participants, []),
-  getSelectedGuideId: (fallbackGuideId) =>
+
+  getSelectedGuideId: (fallbackGuideId: string) =>
     readFromStorage(storageKeys.selectedGuideId, fallbackGuideId),
-  saveSelectedGuideId: (guideId) => {
+  saveSelectedGuideId: (guideId: string) => {
     writeToStorage(storageKeys.selectedGuideId, guideId);
   },
-  isAdminUnlocked: () => readFromStorage(storageKeys.adminUnlocked, false),
-  setAdminUnlocked: (isUnlocked) => {
-    writeToStorage(storageKeys.adminUnlocked, isUnlocked);
-  },
-  verifyAdminPassword: (password) =>
-    password === readFromStorage(storageKeys.adminPassword, mockAdminConfig.password),
-  setAdminPassword: (password) => {
-    writeToStorage(storageKeys.adminPassword, password);
-  },
-  listEventResponses: () =>
-    readFromStorage<EventSurveyResponse[]>(storageKeys.eventResponses, []),
-  saveEventResponses: (responses) => {
-    writeToStorage(storageKeys.eventResponses, responses);
-  },
-  saveEventResponse: (response) => {
-    const responses = readFromStorage<EventSurveyResponse[]>(storageKeys.eventResponses, []);
-    const nextResponses = responses.filter(
-      (savedResponse) =>
-        !(
-          savedResponse.guideId === response.guideId &&
-          savedResponse.eventId === response.eventId &&
-          (response.participantId
-            ? savedResponse.participantId === response.participantId
-            : savedResponse.participantName === response.participantName)
-        ),
-    );
 
-    writeToStorage(storageKeys.eventResponses, [...nextResponses, response]);
-  },
-  getEventOverrides: () =>
-    readFromStorage<Record<string, EventItem[]>>(storageKeys.eventOverrides, {}),
-  saveEventOverrides: (eventOverrides) => {
-    writeToStorage(storageKeys.eventOverrides, eventOverrides);
+  isAdminUnlocked: () => readFromStorage(storageKeys.adminUnlocked, false),
+  setAdminUnlocked: (isUnlocked: boolean) => {
+    writeToStorage(storageKeys.adminUnlocked, isUnlocked);
   },
 };
