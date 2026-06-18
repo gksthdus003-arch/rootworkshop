@@ -726,77 +726,82 @@ export const InteractiveMap = ({
         </button>
       </div>
 
-      <div
-        className="absolute bottom-20 left-3 z-20 flex flex-col gap-1.5 sm:bottom-6"
-        onPointerDown={(event) => event.stopPropagation()}
-        onWheel={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        <button
-          aria-expanded={isControlMenuOpen}
-          className="inline-flex min-h-8 w-fit items-center gap-1.5 rounded-full bg-white/90 px-2.5 text-xs font-bold text-brand-900 shadow-soft backdrop-blur hover:bg-white"
-          onClick={() => setIsControlMenuOpen((isOpen) => !isOpen)}
-          type="button"
+      {/* Bottom-left controls and the bottom notice banner share one
+          bottom-anchored column so the full-width banner can never cover the
+          "옵션" button, regardless of banner height or breakpoint. */}
+      <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 flex flex-col items-start gap-2">
+        <div
+          className="pointer-events-auto flex flex-col gap-1.5"
+          onPointerDown={(event) => event.stopPropagation()}
+          onWheel={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
         >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          옵션
-        </button>
+          <button
+            aria-expanded={isControlMenuOpen}
+            className="inline-flex min-h-8 w-fit items-center gap-1.5 rounded-full bg-white/90 px-2.5 text-xs font-bold text-brand-900 shadow-soft backdrop-blur hover:bg-white"
+            onClick={() => setIsControlMenuOpen((isOpen) => !isOpen)}
+            type="button"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            옵션
+          </button>
 
-        {isControlMenuOpen ? (
-          <div className="grid w-28 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
-            {shouldShowCurrentLocationButton ? (
-              <button
-                className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-brand-700 px-1 text-white hover:bg-brand-800"
-                onClick={handleMoveToCurrentLocation}
-                type="button"
-              >
-                <MapPin className="h-3 w-3 justify-self-center" />
-                <span className="truncate text-left">현재 장소</span>
-                <ArrowRight className="h-3 w-3 justify-self-center" />
-              </button>
-            ) : null}
-            <label className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-white/70 px-1 text-gray-700 ring-1 ring-gray-200">
-              <Cigarette className="h-3 w-3 justify-self-center" />
-              <span className="truncate text-left">흡연구역</span>
-              <input
-                checked={showSmokingAreas}
-                className="h-3.5 w-3.5 justify-self-center accent-gray-900"
-                onChange={(event) => setShowSmokingAreas(event.target.checked)}
-                type="checkbox"
-              />
-            </label>
+          {isControlMenuOpen ? (
+            <div className="grid w-28 grid-cols-[1rem_minmax(0,1fr)_1rem] items-center gap-x-1.5 gap-y-1 rounded-md bg-white/85 px-1.5 py-1 text-[11px] font-bold shadow-soft backdrop-blur">
+              {shouldShowCurrentLocationButton ? (
+                <button
+                  className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-brand-700 px-1 text-white hover:bg-brand-800"
+                  onClick={handleMoveToCurrentLocation}
+                  type="button"
+                >
+                  <MapPin className="h-3 w-3 justify-self-center" />
+                  <span className="truncate text-left">현재 장소</span>
+                  <ArrowRight className="h-3 w-3 justify-self-center" />
+                </button>
+              ) : null}
+              <label className="col-span-3 grid min-h-7 grid-cols-subgrid items-center rounded bg-white/70 px-1 text-gray-700 ring-1 ring-gray-200">
+                <Cigarette className="h-3 w-3 justify-self-center" />
+                <span className="truncate text-left">흡연구역</span>
+                <input
+                  checked={showSmokingAreas}
+                  className="h-3.5 w-3.5 justify-self-center accent-gray-900"
+                  onChange={(event) => setShowSmokingAreas(event.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+            </div>
+          ) : null}
+        </div>
+
+        {noticeMessage ? (
+          <div
+            className="pointer-events-auto w-full rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <span>{noticeMessage}</span>
+          </div>
+        ) : shouldShowPreGuideBanner && onPreGuideClick ? (
+          <div
+            className={cn(
+              "pointer-events-auto w-full rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur",
+              preGuideNudgeId > 0 ? "pre-guide-banner-nudge" : "",
+            )}
+            key={preGuideNudgeId}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <span>워크숍 시작 전입니다.</span>
+            <button
+              className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
+              onClick={onPreGuideClick}
+              type="button"
+            >
+              사전안내 보러가기
+            </button>
           </div>
         ) : null}
       </div>
-
-      {noticeMessage ? (
-        <div
-          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur"
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <span>{noticeMessage}</span>
-        </div>
-      ) : shouldShowPreGuideBanner && onPreGuideClick ? (
-        <div
-          className={cn(
-            "absolute bottom-3 left-3 right-3 z-20 rounded-lg bg-gray-950/90 px-3 py-2 text-center text-xs font-bold leading-5 text-white shadow-soft backdrop-blur",
-            preGuideNudgeId > 0 ? "pre-guide-banner-nudge" : "",
-          )}
-          key={preGuideNudgeId}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <span>워크숍 시작 전입니다.</span>
-          <button
-            className="ml-2 rounded-full bg-white px-2 py-1 text-xs font-bold text-gray-950"
-            onClick={onPreGuideClick}
-            type="button"
-          >
-            사전안내 보러가기
-          </button>
-        </div>
-      ) : null}
 
       <div
         className="absolute right-3 top-3 z-20 flex flex-col gap-2"
