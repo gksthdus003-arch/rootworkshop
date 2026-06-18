@@ -10,7 +10,8 @@
     "lint": "tsc --noEmit",
     "bootstrap": "node server/scripts/bootstrap.mjs",
     "dev:server": "tsx watch server/index.ts",
-    "dev:all": "concurrently -n web,api -c blue,green \"npm:dev\" \"npm:dev:server\""
+    "dev:all": "concurrently -n web,api -c blue,green \"npm:dev\" \"npm:dev:server\"",
+    "start:prod": "bash scripts/build-and-run.sh"
   },
   "dependencies": {
     "cors": "^2.8.6",

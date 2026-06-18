@@ -1,3 +1,5 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import { ensureSchema } from "./schema";
@@ -21,6 +23,21 @@ app.use("/api/participants", participantsRouter);
 app.use("/api/event-responses", eventResponsesRouter);
 app.use("/api/event-overrides", eventOverridesRouter);
 app.use("/api/admin", adminRouter);
+
+// In production, serve the built frontend (dist/) and fall back to index.html
+// for client-side routing. Enabled via SERVE_STATIC=true (set by the deploy
+// script); in dev the Vite server serves the frontend instead.
+if (process.env.SERVE_STATIC === "true") {
+  const distDir = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
+  app.use(express.static(distDir));
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || req.path.startsWith("/api")) {
+      next();
+      return;
+    }
+    res.sendFile(join(distDir, "index.html"));
+  });
+}
 
 // JSON error handler — keep last.
 app.use(

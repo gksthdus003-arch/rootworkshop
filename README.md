@@ -101,6 +101,25 @@ npm run dev          # Vite dev on :5173 (/api → :4000 프록시)
 
 서버 접속 정보는 `server/.env`에서 관리합니다(`DB_USER=workshop` 등).
 
+### 배포판 빌드 & 실행 (프로덕션)
+
+프론트를 빌드하고, Express 서버가 빌드 결과(`dist/`)와 `/api`를 **한 포트(기본 9704)**
+에서 함께 서빙합니다. Vite/프록시는 런타임에 필요 없습니다.
+
+```bash
+npm run start:prod
+# 또는
+bash scripts/build-and-run.sh
+
+# 포트 변경
+APP_PORT=8080 bash scripts/build-and-run.sh
+# DB 부트스트랩 건너뛰기
+SKIP_BOOTSTRAP=1 bash scripts/build-and-run.sh
+```
+
+스크립트는 의존성 설치 → DB 부트스트랩(멱등) → 프론트 빌드 → 프로덕션 서버 실행을
+순서대로 수행합니다. 실행 후 `http://localhost:9704` 에서 접속합니다.
+
 ### API 스모크 테스트
 
 ```bash
