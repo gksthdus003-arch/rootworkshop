@@ -7,6 +7,10 @@ import {
   useState,
 } from "react";
 import { clientState, workshopApi } from "../services/workshopRepository";
+import {
+  ensureBowlingTargetScoreQuestions,
+  isBowlingTargetScoreQuestion,
+} from "../lib/bowlingLevelSurvey";
 import type {
   AnnouncementItem,
   BottomTabId,
@@ -198,8 +202,13 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
 
   const value = useMemo<WorkshopStoreValue>(() => {
     const saveGuides = (nextGuides: WorkshopGuide[]) => {
-      setGuides(nextGuides);
-      void workshopApi.saveGuides(nextGuides);
+      const protectedGuides = nextGuides.map((guide) => ({
+        ...guide,
+        events: ensureBowlingTargetScoreQuestions(guide.events),
+      }));
+
+      setGuides(protectedGuides);
+      void workshopApi.saveGuides(protectedGuides);
     };
 
     const updateGuideById = (
@@ -476,14 +485,20 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     const deleteSurveyQuestion = (guideId: string, eventId: string, questionId: string) => {
       updateGuideById(guideId, (guide) => ({
         ...guide,
-        events: guide.events.map((event) =>
-          event.id === eventId
-            ? {
-                ...event,
-                survey: event.survey.filter((question) => question.id !== questionId),
-              }
-            : event,
-        ),
+        events: guide.events.map((event) => {
+          if (event.id !== eventId) {
+            return event;
+          }
+
+          if (isBowlingTargetScoreQuestion(event, questionId, guide.events)) {
+            return event;
+          }
+
+          return {
+            ...event,
+            survey: event.survey.filter((question) => question.id !== questionId),
+          };
+        }),
       }));
     };
 

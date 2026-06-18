@@ -1560,6 +1560,9 @@ export const EventsPage = () => {
     (event) => event.id === surveyEventId && event.status === "active",
   );
   const detailEvent = selectedGuide.events.find((event) => event.id === detailEventId);
+  const visibleEvents = selectedGuide.events.filter(
+    (event) => event.showInEventList !== false && event.surveyKind !== "transport",
+  );
   const saveResponseForEvent = (
     event: EventItem,
     answers: Record<string, string | string[]>,
@@ -1639,8 +1642,8 @@ export const EventsPage = () => {
       </div>
 
       <div className="space-y-3">
-        {selectedGuide.events.filter((event) => event.showInEventList !== false).length > 0 ? (
-          selectedGuide.events.filter((event) => event.showInEventList !== false).map((event) => {
+        {visibleEvents.length > 0 ? (
+          visibleEvents.map((event) => {
             const response = responseByEventId.get(event.id);
             const hasSubmitted = Boolean(response);
             const assignedTeam = getAssignedTeam(event, participantName, response);

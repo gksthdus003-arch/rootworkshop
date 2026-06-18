@@ -453,6 +453,36 @@ export const mockWorkshopGuides: WorkshopGuide[] = [
           },
         ],
       },
+      {
+        id: "transport-team",
+        workshopId: "workshop-2026",
+        title: "차량 이동 조 배정",
+        description: "워크숍 당일 차량 이동 조를 확인합니다.",
+        type: "survey",
+        surveyKind: "transport",
+        showInEventList: false,
+        status: "closed",
+        opensAt: "2026-07-02T08:00:00+09:00",
+        closesAt: "2026-07-02T09:00:00+09:00",
+        requiresTeamAssignment: true,
+        survey: [],
+        teams: [
+          {
+            id: "transport-bus-1",
+            eventId: "transport-team",
+            name: "1호차",
+            members: ["김민준", "이서연", "박도윤", "최지우"],
+            memo: "08:30까지 본관 앞 집결",
+          },
+          {
+            id: "transport-bus-2",
+            eventId: "transport-team",
+            name: "2호차",
+            members: ["정하준", "한수아", "오지훈", "강예린"],
+            memo: "08:40까지 7번 주차장 집결",
+          },
+        ],
+      },
     ],
     recommendations: [
       {

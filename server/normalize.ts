@@ -103,6 +103,15 @@ const inferSurveyKind = (event: EventItem, type: EventType): SurveyKind | undefi
   const legacyType = typeof rawType === "string" ? rawType : undefined;
   const searchableText = `${event.id} ${event.title}`.toLowerCase();
 
+  if (
+    legacyType === "transport" ||
+    searchableText.includes("transport") ||
+    searchableText.includes("차량") ||
+    searchableText.includes("이동 조")
+  ) {
+    return "transport";
+  }
+
   if (legacyType === "activity" || searchableText.includes("activity") || searchableText.includes("액티비티")) {
     return "activity";
   }
@@ -234,6 +243,12 @@ const normalizeEvent = (event: EventItem, index: number, workshopId: string): Ev
   };
 };
 
+const isTransportTeamEvent = (event: EventItem) =>
+  event.id === "transport-team" ||
+  (event.type === "survey" &&
+    event.surveyKind === "transport" &&
+    (event.title.includes("차량") || event.title.includes("이동")));
+
 const ensureDefault2026Events = (events: EventItem[], mockDefaultGuide?: WorkshopGuide) => {
   const hasBowlingEvent = events.some(
     (event) =>
@@ -244,17 +259,25 @@ const ensureDefault2026Events = (events: EventItem[], mockDefaultGuide?: Worksho
           event.title.includes("볼링 대회"))),
   );
 
-  if (hasBowlingEvent) {
-    return events;
-  }
-
   const mockBowlingEvent = mockDefaultGuide?.events.find(
     (event) => event.id === "bowling-competition",
   );
 
-  return mockBowlingEvent && mockDefaultGuide
+  const withBowlingEvent = !hasBowlingEvent && mockBowlingEvent && mockDefaultGuide
     ? [...events, normalizeEvent(mockBowlingEvent, events.length, mockDefaultGuide.id)]
     : events;
+
+  const hasTransportTeamEvent = withBowlingEvent.some(isTransportTeamEvent);
+  const mockTransportTeamEvent = mockDefaultGuide?.events.find(
+    (event) => event.id === "transport-team",
+  );
+
+  return !hasTransportTeamEvent && mockTransportTeamEvent && mockDefaultGuide
+    ? [
+        ...withBowlingEvent,
+        normalizeEvent(mockTransportTeamEvent, withBowlingEvent.length, mockDefaultGuide.id),
+      ]
+    : withBowlingEvent;
 };
 
 const normalizeRecommendation = (

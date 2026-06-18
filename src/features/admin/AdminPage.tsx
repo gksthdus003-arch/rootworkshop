@@ -17,6 +17,10 @@ import konjiamMapImageUrl from "../../assets/konjiam-map-base.png";
 import { InteractiveMap } from "../map/InteractiveMap";
 import { cn } from "../../lib/cn";
 import {
+  bowlingTargetScoreQuestion,
+  isBowlingTargetScoreQuestion,
+} from "../../lib/bowlingLevelSurvey";
+import {
   getMapLocationCategoryIcon,
   mapLocationCategoryLabels,
 } from "../../lib/mapLocationCategories";
@@ -50,7 +54,7 @@ type AdminSectionId =
   | "events"
   | "recommendations";
 
-type EventTemplateId = "activitySurvey" | "bowlingLevelSurvey" | "bowlingEvent";
+type EventTemplateId = "activitySurvey" | "transportTeam" | "bowlingLevelSurvey" | "bowlingEvent";
 type ResponseManageTab = "summary" | "responses" | "teams";
 
 const adminSections: Array<{
@@ -90,6 +94,14 @@ const getEventTemplateDefaults = (templateId: EventTemplateId) => {
   }
 
   if (templateId === "bowlingLevelSurvey") {
+    return {
+      type: "survey" as EventType,
+      showInEventList: false,
+      requiresTeamAssignment: true,
+    };
+  }
+
+  if (templateId === "transportTeam") {
     return {
       type: "survey" as EventType,
       showInEventList: false,
@@ -504,10 +516,7 @@ const createEventFromTemplate = (
           options: ["아니요", "조금 가능", "가능"],
         },
         {
-          id: createId("question"),
-          type: "shortText",
-          label: "이번 볼링 목표 점수를 숫자로 입력해 주세요.",
-          required: true,
+          ...bowlingTargetScoreQuestion,
         },
       ],
       teams: [],
@@ -524,6 +533,24 @@ const createEventFromTemplate = (
       eventKind: "bowling",
       showInEventList: true,
       phase: "preSurvey",
+      status,
+      opensAt: now.toISOString(),
+      closesAt: closesAt.toISOString(),
+      requiresTeamAssignment: true,
+      survey: [],
+      teams: [],
+    };
+  }
+
+  if (templateId === "transportTeam") {
+    return {
+      id: createId("event"),
+      workshopId,
+      title: title || "차량 이동 조 배정",
+      description: "워크숍 당일 차량 이동 조를 확인합니다.",
+      type: "survey",
+      surveyKind: "transport",
+      showInEventList: false,
       status,
       opensAt: now.toISOString(),
       closesAt: closesAt.toISOString(),
@@ -784,6 +811,10 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
     return targetScoreText ? `목표점수 ${targetScoreText}` : "목표점수 -";
   };
+  const getTeamMemberLabel = (event: EventItem, participantName: string) =>
+    event.type === "survey" && event.surveyKind === "bowlingLevel"
+      ? `${participantName} / ${getTargetScoreLabel(participantName)}`
+      : participantName;
   const getKnownParticipantNames = () =>
     new Set([
       ...participants.map((participant) => participant.name),
@@ -2465,6 +2496,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   value={eventTemplateId}
                 >
                   <option value="activitySurvey">액티비티 사전 설문</option>
+                  <option value="transportTeam">차량 이동 조 배정</option>
                   <option value="bowlingLevelSurvey">볼링 대회 레벨 테스트</option>
                   <option value="bowlingEvent">대표님배 볼링대회</option>
                 </select>
@@ -3230,11 +3262,18 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
 
             <div className="space-y-3">
               {surveyManageEvent.survey.length > 0 ? (
-                surveyManageEvent.survey.map((question, questionIndex) => (
-                  <section
-                    className="rounded-lg border border-gray-200 bg-gray-50 p-3"
-                    key={question.id}
-                  >
+                surveyManageEvent.survey.map((question, questionIndex) => {
+                  const isTargetScoreQuestion = isBowlingTargetScoreQuestion(
+                    surveyManageEvent,
+                    question.id,
+                    selectedGuide.events,
+                  );
+
+                  return (
+                    <section
+                      className="rounded-lg border border-gray-200 bg-gray-50 p-3"
+                      key={question.id}
+                    >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold text-gray-600 ring-1 ring-gray-200">
                         #{questionIndex + 1}
@@ -3280,6 +3319,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         <span className={labelClass}>타입</span>
                         <select
                           className={fieldClass}
+                          disabled={isTargetScoreQuestion}
                           onChange={(selectEvent) =>
                             updateSurveyQuestion(
                               selectedGuide.id,
@@ -3314,6 +3354,11 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                           value={question.label}
                         />
                       </label>
+                      {isTargetScoreQuestion ? (
+                        <p className="rounded-lg bg-yellow-50 px-3 py-2 text-sm font-semibold leading-5 text-yellow-800 md:col-span-2">
+                          목표점수 문항은 볼링 이벤트 점수 계산에 필요해 단답형과 필수 상태가 유지됩니다.
+                        </p>
+                      ) : null}
                       <label className="md:col-span-2">
                         <span className={labelClass}>문항 설명</span>
                         <input
@@ -3374,6 +3419,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         <input
                           checked={question.required ?? false}
                           className="h-4 w-4 accent-brand-700"
+                          disabled={isTargetScoreQuestion}
                           onChange={(inputEvent) =>
                             updateSurveyQuestion(
                               selectedGuide.id,
@@ -3387,8 +3433,13 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                         필수
                       </label>
                       <Button
+                        disabled={isTargetScoreQuestion}
                         icon={<Trash2 className="h-4 w-4" />}
                         onClick={() => {
+                          if (isTargetScoreQuestion) {
+                            return;
+                          }
+
                           if (!window.confirm("이 문항을 삭제하시겠습니까?")) {
                             return;
                           }
@@ -3399,9 +3450,15 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                       >
                         삭제
                       </Button>
+                      {isTargetScoreQuestion ? (
+                        <p className="basis-full text-xs font-semibold leading-5 text-gray-500">
+                          목표점수 문항은 볼링 이벤트 점수 계산에 필요해 삭제할 수 없습니다.
+                        </p>
+                      ) : null}
                     </div>
                   </section>
-                ))
+                  );
+                })
               ) : (
                 <p className="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
                   등록된 문항이 없습니다. 문항 추가를 눌러 시작해 주세요.
@@ -4021,7 +4078,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                               className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200"
                               key={response.id}
                             >
-                              {response.participantName} / {getTargetScoreLabel(response.participantName)}
+                              {getTeamMemberLabel(responseManageEvent, response.participantName)}
                             </span>
                           ))
                         ) : (
@@ -4247,7 +4304,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                             className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-gray-700 ring-1 ring-gray-200"
                                             key={member}
                                           >
-                                            {member} / {getTargetScoreLabel(member)}
+                                            {getTeamMemberLabel(responseManageEvent, member)}
                                           </span>
                                         ))
                                       ) : (

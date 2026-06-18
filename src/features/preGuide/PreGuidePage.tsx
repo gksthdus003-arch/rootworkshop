@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { preGuideOverlay } from "../../config/preGuideOverlay";
 import { getDayCountdownLabel } from "../../lib/preGuide";
 import { useWorkshopStore } from "../../store/workshopStore";
+import type { EventItem } from "../../types/workshop";
 
 const ROUGHMAP_TIMESTAMP = "1781064159753";
 const ROUGHMAP_CONTAINER_ID = `daumRoughmapContainer${ROUGHMAP_TIMESTAMP}`;
@@ -42,12 +43,18 @@ type ModalState =
     }
   | undefined;
 
+const isTransportTeamEvent = (event: EventItem) =>
+  event.id === "transport-team" ||
+  (event.type === "survey" &&
+    event.surveyKind === "transport" &&
+    (event.title.includes("차량") || event.title.includes("이동")));
+
 export const PreGuidePage = ({ onBack, onSurveyClick }: PreGuidePageProps) => {
   const { participantProfile, selectedGuide } = useWorkshopStore();
   const [modal, setModal] = useState<ModalState>();
   const participantName = participantProfile?.name;
-  const assignedTeam = selectedGuide.events
-    .flatMap((event) => event.teams)
+  const transportTeamEvent = selectedGuide.events.find(isTransportTeamEvent);
+  const assignedTeam = transportTeamEvent?.teams
     .find((team) => (participantName ? team.members.includes(participantName) : false));
   const hasActiveSurvey = selectedGuide.events.some((event) => event.status === "active");
 
