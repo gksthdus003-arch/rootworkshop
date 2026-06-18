@@ -72,4 +72,43 @@ npm install
 npm run dev
 ```
 
-관리자 mock 비밀번호는 `1234`입니다. 실제 배포 전에는 Firebase Auth 또는 서버 검증으로 대체해야 합니다.
+관리자 기본 비밀번호는 `1234`입니다 (DB의 `app_config` 테이블에 저장, 관리자 화면에서 변경 가능).
+
+## 백엔드 (MySQL)
+
+데이터는 더 이상 localStorage가 아닌 MySQL(`workshop` DB)에 저장됩니다. Docker
+컨테이너 `root-ims-mysql`의 MySQL을 사용하며, Express API 서버(`server/`)가 모든
+데이터 로직(정규화/검증/시드)을 담당합니다.
+
+### 최초 1회: DB/계정 부트스트랩
+
+root 계정으로 `workshop` 데이터베이스와 `workshop`/`workshop123` 전용 계정을 생성합니다.
+
+```bash
+npm run bootstrap
+```
+
+### 실행
+
+```bash
+# 프론트(5173)와 API 서버(4000)를 함께 기동
+npm run dev:all
+
+# 또는 개별 기동
+npm run dev:server   # Express API on :4000 (스키마 생성 + 최초 시드 자동)
+npm run dev          # Vite dev on :5173 (/api → :4000 프록시)
+```
+
+서버 접속 정보는 `server/.env`에서 관리합니다(`DB_USER=workshop` 등).
+
+### API 스모크 테스트
+
+```bash
+npm run dev:server   # 서버 먼저 기동
+node server/scripts/smoke.mjs
+```
+
+### 데이터 위치
+
+- **MySQL 공유 데이터**: 가이드, 참가자 명부, 이벤트 설문 응답, 이벤트 오버라이드, 관리자 비밀번호
+- **브라우저 localStorage(개별 상태)**: 내 이름, 선택한 회차, 관리자 잠금 해제 여부
