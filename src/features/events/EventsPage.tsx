@@ -1095,9 +1095,8 @@ const BowlingEventBoardPage = ({
 }: BowlingEventBoardPageProps) => {
   const boardImageUrl = event.pageBackgroundImage || bowlingEventBoard.imageUrl;
   const isPreSurvey = phase === "preSurvey";
-  const visibleRankings = isPreSurvey
-    ? []
-    : rankings.filter((ranking) => ranking.submittedCount > 0 || ranking.totalScore > 0);
+  // 점수 미입력 조도 모두 노출 (전체 순위에 전 조가 표기되어야 함)
+  const visibleRankings = isPreSurvey ? [] : rankings;
   const teamMemberText = assignedTeam
     ? `${assignedTeam.name} : ${
         assignedTeam.members.length > 0 ? assignedTeam.members.join(", ") : "조원 등록 대기"
@@ -1218,10 +1217,14 @@ const BowlingEventBoardPage = ({
       </div>
 
       <div
-        className="absolute z-10 overflow-hidden rounded-sm border border-gray-300 bg-white/96 text-gray-950 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-        style={getPositionStyle(bowlingEventOverlay.rankingTable)}
+        className="absolute z-10 overflow-visible rounded-sm border border-gray-300 bg-white/96 text-gray-950 shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+        style={{
+          ...getPositionStyle(bowlingEventOverlay.rankingTable),
+          height: "auto",
+          minHeight: bowlingEventOverlay.rankingTable.height,
+        }}
       >
-        <table className="h-full w-full table-fixed border-collapse text-center font-bold leading-tight text-gray-950">
+        <table className="w-full table-fixed border-collapse text-center font-bold leading-tight text-gray-950">
           <colgroup>
             <col className="w-[15%]" />
             <col className="w-[18%]" />
@@ -1337,13 +1340,17 @@ const EventOnePage = ({
     bowlingScoreResponses,
     levelSurveyEvent ? levelSurveyResponses : bowlingScoreResponses,
   );
-  const visibleRankings =
-    phase === "preSurvey"
-      ? []
-      : rankings.filter((ranking) => ranking.submittedCount > 0 || ranking.totalScore > 0);
-  const myTeamRank = assignedTeam
-    ? visibleRankings.findIndex((ranking) => ranking.team.id === assignedTeam.id) + 1
-    : 0;
+  const visibleRankings = phase === "preSurvey" ? [] : rankings;
+  const myTeamRanking = assignedTeam
+    ? visibleRankings.find((ranking) => ranking.team.id === assignedTeam.id)
+    : undefined;
+  const myTeamHasScore =
+    (myTeamRanking?.submittedCount ?? 0) > 0 || (myTeamRanking?.totalScore ?? 0) > 0;
+  // 우리 팀 순위 메시지는 우리 팀이 점수를 입력한 경우에만 노출 (전체 순위표에는 전 조가 표기됨)
+  const myTeamRank =
+    assignedTeam && myTeamHasScore
+      ? visibleRankings.findIndex((ranking) => ranking.team.id === assignedTeam.id) + 1
+      : 0;
   const hasAnyScore = game1Score !== undefined || game2Score !== undefined;
   const hasSubmittedPreSurvey = Boolean(levelSurveyResponse ?? response);
   const saveLevelTestAnswers = (answers: Record<string, string | string[]>) => {
