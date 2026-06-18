@@ -2,22 +2,40 @@ import { FormEvent, useState } from "react";
 import { Button } from "../common/Button";
 import { useWorkshopStore } from "../../store/workshopStore";
 
+const NETWORK_ERROR_MESSAGE =
+  "확인 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+
 export const NameEntryDialog = () => {
   const { participantProfile, saveParticipantName } = useWorkshopStore();
   const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   if (participantProfile?.name) {
     return null;
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!name.trim()) {
+    const trimmed = name.trim();
+    if (!trimmed || submitting) {
       return;
     }
 
-    saveParticipantName(name);
+    setSubmitting(true);
+    setError("");
+    try {
+      const result = await saveParticipantName(trimmed);
+      if (!result.ok) {
+        setError(result.error ?? NETWORK_ERROR_MESSAGE);
+      }
+    } catch (err) {
+      console.error("[workshop] save participant failed", err);
+      setError(NETWORK_ERROR_MESSAGE);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -34,11 +52,23 @@ export const NameEntryDialog = () => {
         <input
           autoFocus
           className="mt-5 w-full rounded-lg border border-gray-300 px-4 py-3 text-base outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => {
+            setName(event.target.value);
+            if (error) {
+              setError("");
+            }
+          }}
           placeholder="ex) 박우춘"
           value={name}
         />
-        <Button className="mt-4 w-full" disabled={!name.trim()} type="submit">
+        {error ? (
+          <p className="mt-3 text-sm font-medium text-red-600">{error}</p>
+        ) : null}
+        <Button
+          className="mt-4 w-full"
+          disabled={!name.trim() || submitting}
+          type="submit"
+        >
           확인
         </Button>
       </form>

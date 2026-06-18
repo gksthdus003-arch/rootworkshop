@@ -39,11 +39,34 @@ export const workshopApi = {
     }),
 
   listParticipants: () => request<ParticipantProfile[]>("/participants"),
-  saveParticipantProfile: (profile: ParticipantProfile) =>
-    request<ParticipantProfile[]>("/participants", {
+  // Server is the source of truth for membership: a non-member returns 403 and
+  // is reported back as { ok: false } instead of throwing.
+  registerParticipant: async (
+    profile: ParticipantProfile,
+  ): Promise<
+    | { ok: true; participants: ParticipantProfile[] }
+    | { ok: false; error: string }
+  > => {
+    const response = await fetch(`${API_BASE}/participants`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(profile),
-    }),
+    });
+
+    if (response.status === 403) {
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      return { ok: false, error: data.error ?? "접근이 불가합니다." };
+    }
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => response.statusText);
+      throw new Error(`API /participants failed (${response.status}): ${message}`);
+    }
+
+    return { ok: true, participants: (await response.json()) as ParticipantProfile[] };
+  },
 
   listEventResponses: () => request<EventSurveyResponse[]>("/event-responses"),
   saveEventResponses: (responses: EventSurveyResponse[]) =>

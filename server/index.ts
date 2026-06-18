@@ -6,6 +6,7 @@ import { ensureSchema } from "./schema";
 import { seedIfEmpty } from "./seed";
 import { guidesRouter } from "./routes/guides";
 import { participantsRouter } from "./routes/participants";
+import { membersRouter } from "./routes/members";
 import { eventResponsesRouter } from "./routes/eventResponses";
 import { eventOverridesRouter } from "./routes/eventOverrides";
 import { adminRouter } from "./routes/admin";
@@ -20,6 +21,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/guides", guidesRouter);
 app.use("/api/participants", participantsRouter);
+app.use("/api/members", membersRouter);
 app.use("/api/event-responses", eventResponsesRouter);
 app.use("/api/event-overrides", eventOverridesRouter);
 app.use("/api/admin", adminRouter);

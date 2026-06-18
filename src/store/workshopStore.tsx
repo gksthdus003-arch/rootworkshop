@@ -36,7 +36,9 @@ interface WorkshopStoreValue {
   setActiveTab: (tabId: BottomTabId) => void;
   openScheduleTab: () => void;
   selectGuide: (guideId: string) => void;
-  saveParticipantName: (name: string) => void;
+  saveParticipantName: (
+    name: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   createGuide: (guide: WorkshopGuide) => void;
   updateGuide: (guideId: string, updates: Partial<WorkshopGuide>) => void;
   deleteGuide: (guideId: string) => void;
@@ -212,19 +214,30 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       clientState.saveSelectedGuideId(guideId);
     };
 
-    const saveParticipantName = (name: string) => {
+    const saveParticipantName = async (
+      name: string,
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        return { ok: false };
+      }
+
       const profile = {
         id: participantProfile?.id ?? `participant-${Date.now()}`,
-        name: name.trim(),
+        name: trimmed,
         createdAt: new Date().toISOString(),
       };
 
+      // Server validates membership; only commit locally once it confirms.
+      const result = await workshopApi.registerParticipant(profile);
+      if (!result.ok) {
+        return { ok: false, error: result.error };
+      }
+
       setParticipantProfile(profile);
       clientState.saveParticipantProfile(profile);
-      void workshopApi
-        .saveParticipantProfile(profile)
-        .then((nextParticipants) => setParticipants(nextParticipants))
-        .catch((error) => console.error("[workshop] save participant failed", error));
+      setParticipants(result.participants);
+      return { ok: true };
     };
 
     const unlockAdmin = async (password: string) => {
