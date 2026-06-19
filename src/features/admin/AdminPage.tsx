@@ -729,6 +729,8 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   });
   const [isScheduleAddModalOpen, setIsScheduleAddModalOpen] = useState(false);
   const [scheduleEditDraft, setScheduleEditDraft] = useState<ScheduleEditDraft | null>(null);
+  const [isScheduleSaving, setIsScheduleSaving] = useState(false);
+  const [scheduleSaveError, setScheduleSaveError] = useState("");
   const [eventTitle, setEventTitle] = useState("");
   const [eventTemplateId, setEventTemplateId] = useState<EventTemplateId>("activitySurvey");
   const [eventAddType, setEventAddType] = useState<EventType>(
@@ -1046,6 +1048,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
   };
 
   const openScheduleEditModal = (scheduleItem: ScheduleItem) => {
+    setScheduleSaveError("");
     setScheduleEditDraft({
       id: scheduleItem.id,
       title: scheduleItem.title,
@@ -1058,23 +1061,37 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     });
   };
 
-  const handleSaveScheduleEdit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSaveScheduleEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!scheduleEditDraft) {
+    if (!scheduleEditDraft || isScheduleSaving) {
       return;
     }
 
-    updateScheduleItem(selectedGuide.id, scheduleEditDraft.id, {
-      title: scheduleEditDraft.title,
-      description: scheduleEditDraft.description,
-      startAt: getIsoDateTimeValue(scheduleEditDraft.startAt),
-      endAt: getIsoDateTimeValue(scheduleEditDraft.endAt),
-      location: scheduleEditDraft.location.trim() || "장소 미정",
-      locationId: scheduleEditDraft.locationId || undefined,
-      category: scheduleEditDraft.category,
-    });
-    setScheduleEditDraft(null);
+    setIsScheduleSaving(true);
+    setScheduleSaveError("");
+
+    try {
+      await updateScheduleItem(selectedGuide.id, scheduleEditDraft.id, {
+        title: scheduleEditDraft.title,
+        description: scheduleEditDraft.description,
+        startAt: getIsoDateTimeValue(scheduleEditDraft.startAt),
+        endAt: getIsoDateTimeValue(scheduleEditDraft.endAt),
+        location: scheduleEditDraft.location.trim() || "장소 미정",
+        locationId: scheduleEditDraft.locationId || undefined,
+        category: scheduleEditDraft.category,
+      });
+      setScheduleEditDraft(null);
+    } catch (error) {
+      console.error("[admin] failed to save schedule item", error);
+      setScheduleSaveError(
+        error instanceof Error
+          ? error.message
+          : "일정 저장에 실패했습니다. 잠시 후 다시 시도해주세요.",
+      );
+    } finally {
+      setIsScheduleSaving(false);
+    }
   };
 
   const handleDeleteScheduleItem = (scheduleItem: ScheduleItem) => {
@@ -2825,7 +2842,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
         <AdminModal
           title="일정 수정"
           description="시간, 장소 연결, 구분 정보를 수정합니다."
-          onClose={() => setScheduleEditDraft(null)}
+          onClose={() => {
+            if (!isScheduleSaving) {
+              setScheduleEditDraft(null);
+              setScheduleSaveError("");
+            }
+          }}
         >
           <form className="space-y-4" onSubmit={handleSaveScheduleEdit}>
             <div className="grid gap-3 md:grid-cols-2">
@@ -2922,12 +2944,28 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                 />
               </label>
             </div>
+            {scheduleSaveError ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-semibold leading-5 text-red-700">
+                {scheduleSaveError}
+              </p>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 pt-2">
-              <Button onClick={() => setScheduleEditDraft(null)} variant="secondary">
+              <Button
+                disabled={isScheduleSaving}
+                onClick={() => {
+                  setScheduleEditDraft(null);
+                  setScheduleSaveError("");
+                }}
+                variant="secondary"
+              >
                 취소
               </Button>
-              <Button icon={<Check className="h-4 w-4" />} type="submit">
-                저장
+              <Button
+                disabled={isScheduleSaving}
+                icon={<Check className="h-4 w-4" />}
+                type="submit"
+              >
+                {isScheduleSaving ? "저장 중" : "저장"}
               </Button>
             </div>
           </form>

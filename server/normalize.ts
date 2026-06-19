@@ -329,11 +329,8 @@ const normalizeMapLocation = (location: MapLocation, index: number): MapLocation
   };
 };
 
-const shouldUseDefault2026Schedule = (guide: WorkshopGuide) => guide.id === "workshop-2026";
-
 const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => {
-  const shouldUseMockSchedule = shouldUseDefault2026Schedule(guide);
-  const mockDefaultGuide = shouldUseMockSchedule ? getMockDefaultGuide() : undefined;
+  const mockDefaultGuide = guide.id === "workshop-2026" ? getMockDefaultGuide() : undefined;
   const fallbackStartDate = guide.schedule?.[0]?.startAt ?? new Date().toISOString();
 
   return {
@@ -358,20 +355,15 @@ const normalizeGuide = (guide: WorkshopGuide, index: number): WorkshopGuide => {
     poster: normalizePoster(guide.poster, mockDefaultGuide?.poster),
     isDefault: guide.isDefault ?? index === 0,
     isPublished: guide.isPublished ?? true,
-    scheduleControl: shouldUseMockSchedule
-      ? mockDefaultGuide?.scheduleControl ?? {
-          mode: "auto",
-          manualCurrentScheduleId: undefined,
-        }
-      : guide.scheduleControl ?? {
-          mode: "auto",
-          manualCurrentScheduleId: undefined,
-        },
-    schedule: shouldUseMockSchedule
-      ? mockDefaultGuide?.schedule ?? []
-      : Array.isArray(guide.schedule)
-        ? guide.schedule
-        : [],
+    scheduleControl:
+      guide.scheduleControl ??
+      mockDefaultGuide?.scheduleControl ?? {
+        mode: "auto",
+        manualCurrentScheduleId: undefined,
+      },
+    schedule: Array.isArray(guide.schedule)
+      ? guide.schedule
+      : mockDefaultGuide?.schedule ?? [],
     map: {
       title: guide.map?.title || "워크숍 안내 지도",
       imageUrl: guide.map?.imageUrl || "/assets/konjiam-map-base.png",

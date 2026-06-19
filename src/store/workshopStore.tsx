@@ -59,7 +59,7 @@ interface WorkshopStoreValue {
     guideId: string,
     scheduleItemId: string,
     updates: Partial<ScheduleItem>,
-  ) => void;
+  ) => Promise<void>;
   deleteScheduleItem: (guideId: string, scheduleItemId: string) => void;
   moveScheduleItem: (guideId: string, scheduleItemId: string, direction: "up" | "down") => void;
   updateScheduleControl: (guideId: string, updates: Partial<ScheduleControlConfig>) => void;
@@ -372,12 +372,15 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       scheduleItemId: string,
       updates: Partial<ScheduleItem>,
     ) => {
-      updateGuideById(guideId, (guide) => ({
-        ...guide,
-        schedule: guide.schedule.map((scheduleItem) =>
-          scheduleItem.id === scheduleItemId ? { ...scheduleItem, ...updates } : scheduleItem,
-        ),
-      }));
+      return workshopApi
+        .updateScheduleItem(guideId, scheduleItemId, updates)
+        .then((updatedGuide) => {
+          setGuides((currentGuides) =>
+            currentGuides.map((guide) =>
+              guide.id === updatedGuide.id ? updatedGuide : guide,
+            ),
+          );
+        });
     };
 
     const deleteScheduleItem = (guideId: string, scheduleItemId: string) => {

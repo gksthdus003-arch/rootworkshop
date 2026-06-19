@@ -5,6 +5,7 @@ import type {
   EventSurveyResponse,
   ParticipantProfile,
   WorkshopGuide,
+  ScheduleItem,
 } from "../types/workshop";
 
 const API_BASE = "/api";
@@ -37,6 +38,18 @@ export const workshopApi = {
       method: "PUT",
       body: JSON.stringify(guides),
     }),
+  updateScheduleItem: (
+    guideId: string,
+    scheduleItemId: string,
+    updates: Partial<ScheduleItem>,
+  ) =>
+    request<WorkshopGuide>(
+      `/guides/${encodeURIComponent(guideId)}/schedule/${encodeURIComponent(scheduleItemId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(updates),
+      },
+    ),
 
   listParticipants: () => request<ParticipantProfile[]>("/participants"),
   // Server is the source of truth for membership: a non-member returns 403 and
