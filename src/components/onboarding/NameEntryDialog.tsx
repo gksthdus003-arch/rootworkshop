@@ -58,7 +58,7 @@ export const NameEntryDialog = () => {
               setError("");
             }
           }}
-          placeholder="ex) 박우춘"
+          placeholder="ex) 한소연"
           value={name}
         />
         {error ? (
