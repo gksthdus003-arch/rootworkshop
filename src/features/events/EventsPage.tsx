@@ -62,6 +62,9 @@ const isAnswered = (value: string | string[] | number | undefined) =>
 const formatAnswerValue = (value: string | string[] | number) =>
   Array.isArray(value) ? value.join(", ") : String(value);
 
+const getAnswerPanelTitle = (event: EventItem) =>
+  getSurveyKind(event) === "activity" ? "내가 선택한 액티비티" : "나의 답변";
+
 const getSurveyAnswerDrafts = (response: EventSurveyResponse | undefined) =>
   Object.fromEntries(
     Object.entries(response?.answers ?? {}).map(([key, value]) => [
@@ -523,9 +526,7 @@ interface EventResultPageProps {
 
 const EventResultPage = ({ event, participantName, response, onBack }: EventResultPageProps) => {
   const [isAllTeamsOpen, setIsAllTeamsOpen] = useState(false);
-  const assignedTeam =
-    event.teams.find((team) => team.id === response?.assignedTeamId) ??
-    event.teams.find((team) => (participantName ? team.members.includes(participantName) : false));
+  const assignedTeam = getAssignedTeam(event, participantName, response);
 
   return (
     <section className="-mx-4 -mb-3 -mt-3 bg-gray-50">
@@ -935,6 +936,144 @@ const OnePageSection = ({ children, className }: OnePageSectionProps) => (
   </section>
 );
 
+interface TeamAssignmentPanelProps {
+  assignedTeam?: EventItem["teams"][number];
+  event: EventItem;
+  isAllTeamsOpen: boolean;
+  onToggleAllTeams: () => void;
+}
+
+const TeamAssignmentPanel = ({
+  assignedTeam,
+  event,
+  isAllTeamsOpen,
+  onToggleAllTeams,
+}: TeamAssignmentPanelProps) => (
+  <OnePageSection>
+    <div className="flex items-start gap-2">
+      <div className="mt-0.5 rounded-full bg-brand-50 p-1.5 text-brand-700">
+        <Users className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-lg font-black text-gray-950">조 배치 현황</h2>
+        <p className="mt-1 text-sm leading-5 text-gray-600">
+          {event.resultSummary ?? "관리자가 배정한 조 정보를 확인할 수 있습니다."}
+        </p>
+      </div>
+    </div>
+
+    {assignedTeam ? (
+      <div className="mt-3 rounded-lg border border-brand-100 bg-brand-50 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-black text-brand-950">{assignedTeam.name}</p>
+          <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[11px] font-bold text-white">
+            내 조
+          </span>
+        </div>
+        <p className="mt-2 break-words text-sm font-semibold leading-5 text-brand-900">
+          {assignedTeam.members.length > 0 ? assignedTeam.members.join(", ") : "조원 등록 대기"}
+        </p>
+        {assignedTeam.memo ? (
+          <p className="mt-2 break-words text-xs font-bold text-brand-700">
+            {assignedTeam.memo}
+          </p>
+        ) : null}
+      </div>
+    ) : (
+      <p className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm font-semibold text-gray-600">
+        조 배정 대기 중입니다.
+      </p>
+    )}
+
+    <Button
+      className="mt-3 min-h-9 w-full py-1.5"
+      onClick={onToggleAllTeams}
+      variant="secondary"
+    >
+      {isAllTeamsOpen ? "전체 조 접기" : "전체 조 보기"}
+    </Button>
+
+    {isAllTeamsOpen ? (
+      <div className="mt-3 space-y-2">
+        {event.teams.length > 0 ? (
+          event.teams.map((team) => {
+            const isMyTeam = assignedTeam?.id === team.id;
+
+            return (
+              <section
+                className={cn(
+                  "rounded-lg border p-3",
+                  isMyTeam ? "border-brand-200 bg-brand-50" : "border-gray-200 bg-white",
+                )}
+                key={team.id}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className={cn("font-bold", isMyTeam ? "text-brand-950" : "text-gray-950")}>
+                    {team.name}
+                  </p>
+                  {isMyTeam ? (
+                    <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[11px] font-bold text-white">
+                      내 조
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-2 break-words text-sm leading-5 text-gray-600">
+                  {team.members.length > 0 ? team.members.join(", ") : "아직 배정된 인원이 없습니다."}
+                </p>
+                {team.memo ? (
+                  <p className="mt-2 break-words text-xs font-bold text-brand-700">
+                    {team.memo}
+                  </p>
+                ) : null}
+              </section>
+            );
+          })
+        ) : (
+          <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
+            등록된 조가 없습니다.
+          </p>
+        )}
+      </div>
+    ) : null}
+  </OnePageSection>
+);
+
+interface MyAnswersPanelProps {
+  event: EventItem;
+  response?: EventSurveyResponse;
+}
+
+const MyAnswersPanel = ({ event, response }: MyAnswersPanelProps) => {
+  const answerQuestions = event.survey.filter((question) => question.type !== "description");
+
+  return (
+    <OnePageSection>
+      <h2 className="text-lg font-black text-gray-950">{getAnswerPanelTitle(event)}</h2>
+      <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
+        {response && answerQuestions.length > 0 ? (
+          answerQuestions.map((question) => (
+            <p className="rounded-lg bg-gray-50 p-3" key={question.id}>
+              <span className="font-bold text-gray-950">{question.label}: </span>
+              {formatAnswerValue(response.answers[question.id] ?? "") || "-"}
+            </p>
+          ))
+        ) : response && Object.keys(response.answers).length > 0 ? (
+          Object.entries(response.answers).map(([questionId, answer]) => (
+            <p className="rounded-lg bg-gray-50 p-3" key={questionId}>
+              <span className="font-bold text-gray-950">{questionId}: </span>
+              {formatAnswerValue(answer) || "-"}
+            </p>
+          ))
+        ) : (
+          <p className="rounded-lg bg-gray-50 p-3 text-gray-500">
+            제출한 답변이 없습니다.
+          </p>
+        )}
+      </div>
+    </OnePageSection>
+  );
+};
+
 interface ScoreInputModalProps {
   assignedTeam?: EventItem["teams"][number];
   event: EventItem;
@@ -1311,6 +1450,11 @@ const EventOnePage = ({
   const [isLevelTestModalOpen, setIsLevelTestModalOpen] = useState(false);
   const eventType = getEventType(event);
   const shouldRenderBowlingBoard = isBowlingEvent(event);
+  const surveyKind = getSurveyKind(event);
+  const isSurveyEvent = eventType === "survey";
+  const isWaitingSurvey = isSurveyEvent && event.status === "waiting";
+  const isActiveSurvey = isSurveyEvent && event.status === "active";
+  const isClosedSurvey = isSurveyEvent && event.status === "closed";
   const levelSurveyEvent = shouldRenderBowlingBoard
     ? findLinkedSurveyEvent(guideEvents, event)
     : undefined;
@@ -1323,9 +1467,12 @@ const EventOnePage = ({
     : [];
   const bowlingTeamSourceEvent = levelSurveyEvent ?? event;
   const participantName = participantProfile?.name;
-  const assignedTeam = getAssignedTeam(bowlingTeamSourceEvent, participantName, levelSurveyResponse);
+  const teamSourceResponse = shouldRenderBowlingBoard ? levelSurveyResponse : response;
+  const assignedTeam = getAssignedTeam(bowlingTeamSourceEvent, participantName, teamSourceResponse);
   const phase = event.phase ?? "preSurvey";
-  const canOpenLevelTest = shouldRenderBowlingBoard && phase !== "result";
+  const levelSurveyStatus = (levelSurveyEvent ?? event).status;
+  const canOpenLevelTest =
+    shouldRenderBowlingBoard && phase !== "result" && levelSurveyStatus === "active";
   const canEditScores = shouldRenderBowlingBoard && phase === "scoreInput";
   const targetScore = getNumericAnswerByKeyOrLabel(
     levelSurveyEvent ?? event,
@@ -1382,134 +1529,114 @@ const EventOnePage = ({
     <EventPageShell
       event={event}
       onBack={onBack}
-      tone={shouldRenderBowlingBoard ? "bowling" : getSurveyKind(event) === "activity" ? "activity" : "default"}
+      tone={shouldRenderBowlingBoard ? "bowling" : surveyKind === "activity" ? "activity" : "default"}
     >
       {shouldRenderBowlingBoard ? (
-        <BowlingEventBoardPage
-          assignedTeam={assignedTeam}
-          canEditScores={canEditScores}
-          canOpenLevelTest={canOpenLevelTest}
-          event={event}
-          game1Score={game1Score}
-          game2Score={game2Score}
-          hasAnyScore={hasAnyScore}
-          hasSubmittedPreSurvey={hasSubmittedPreSurvey}
-          myTeamRank={myTeamRank}
-          onLevelTestOpen={() => setIsLevelTestModalOpen(true)}
-          onScoreInputOpen={() => setIsScoreModalOpen(true)}
-          phase={phase}
-          rankings={rankings}
-          targetScore={targetScore}
-        />
+        <>
+          <BowlingEventBoardPage
+            assignedTeam={assignedTeam}
+            canEditScores={canEditScores}
+            canOpenLevelTest={canOpenLevelTest}
+            event={event}
+            game1Score={game1Score}
+            game2Score={game2Score}
+            hasAnyScore={hasAnyScore}
+            hasSubmittedPreSurvey={hasSubmittedPreSurvey}
+            myTeamRank={myTeamRank}
+            onLevelTestOpen={() => setIsLevelTestModalOpen(true)}
+            onScoreInputOpen={() => setIsScoreModalOpen(true)}
+            phase={phase}
+            rankings={rankings}
+            targetScore={targetScore}
+          />
+          <div className="bg-gray-50 px-3 pb-6 pt-3">
+            <TeamAssignmentPanel
+              assignedTeam={assignedTeam}
+              event={bowlingTeamSourceEvent}
+              isAllTeamsOpen={isAllTeamsOpen}
+              onToggleAllTeams={() => setIsAllTeamsOpen((isOpen) => !isOpen)}
+            />
+          </div>
+        </>
       ) : null}
 
-      {eventType === "survey" && getSurveyKind(event) === "activity" ? (
+      {isWaitingSurvey ? (
         <div className="space-y-3">
           <OnePageSection>
-            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700">
+            <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-bold text-gray-600">
+              진행 전
+            </span>
+            <h1 className="mt-3 text-2xl font-bold leading-tight text-gray-950">{event.title}</h1>
+            <p className="mt-2 text-sm font-semibold leading-5 text-gray-600">
+              아직 진행 전입니다. 관리자가 진행 중으로 변경하면 설문에 응답할 수 있습니다.
+            </p>
+          </OnePageSection>
+        </div>
+      ) : null}
+
+      {isActiveSurvey ? (
+        <div className="space-y-3">
+          <OnePageSection>
+            <span
+              className={cn(
+                "rounded-full px-2.5 py-1 text-xs font-bold",
+                surveyKind === "activity"
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-brand-50 text-brand-700",
+              )}
+            >
               {eventTypeLabels[eventType]}
             </span>
             <h1 className="mt-3 text-2xl font-bold leading-tight text-gray-950">{event.title}</h1>
             <p className="mt-2 text-sm font-semibold leading-5 text-gray-600">
-              {participantName ? `${participantName}님의 액티비티 선택 페이지입니다.` : "참가자 이름 입력 후 선택할 수 있습니다."}
+              {participantName
+                ? `${participantName}님의 응답 페이지입니다.`
+                : "참가자 이름 입력 후 응답할 수 있습니다."}
             </p>
           </OnePageSection>
-          <div className="space-y-3">
-            <OnePageSection>
-              <h2 className="text-lg font-black text-gray-950">액티비티 선택하기</h2>
-              <p className="mt-2 text-sm leading-5 text-gray-600">
-                기존 설문 선택지를 사용해 참여 액티비티를 저장합니다.
-              </p>
-              <Button
-                className="mt-3 min-h-10 w-full rounded-full py-2"
-                disabled={event.status !== "active"}
-                onClick={onOpenSurvey}
-                variant={response ? "secondary" : "primary"}
-              >
-                {response ? "선택 수정하기" : "선택하기"}
-              </Button>
-            </OnePageSection>
+          <OnePageSection>
+            <h2 className="text-lg font-black text-gray-950">
+              {surveyKind === "activity" ? "액티비티 선택하기" : "설문 응답"}
+            </h2>
+            <p className="mt-2 text-sm leading-5 text-gray-600">
+              {response
+                ? "제출한 응답을 확인하고 진행 중에는 수정할 수 있습니다."
+                : "설문에 응답해 주세요."}
+            </p>
+            <Button
+              className="mt-3 min-h-10 w-full rounded-full py-2"
+              onClick={onOpenSurvey}
+              variant={response ? "secondary" : "primary"}
+            >
+              {response ? (surveyKind === "activity" ? "선택 수정하기" : "응답 수정하기") : "참여하기"}
+            </Button>
+          </OnePageSection>
 
-            <OnePageSection>
-              <h2 className="text-lg font-black text-gray-950">내가 선택한 액티비티</h2>
-              <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
-                {response ? (
-                  event.survey
-                    .filter((question) => question.type !== "description")
-                    .map((question) => (
-                      <p className="rounded-lg bg-gray-50 p-3" key={question.id}>
-                        <span className="font-bold text-gray-950">{question.label}: </span>
-                        {formatAnswerValue(response.answers[question.id] ?? "") || "-"}
-                      </p>
-                    ))
-                ) : (
-                  <p className="rounded-lg bg-gray-50 p-3 text-gray-500">아직 선택 전입니다.</p>
-                )}
-              </div>
-            </OnePageSection>
-
-            <OnePageSection>
-              <h2 className="text-lg font-black text-gray-950">내 조 정보</h2>
-              {assignedTeam ? (
-                <p className="mt-2 rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
-                  {assignedTeam.name}: {assignedTeam.members.join(", ")}
-                </p>
-              ) : (
-                <p className="mt-2 rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                  조 배정 대기 중입니다.
-                </p>
-              )}
-            </OnePageSection>
-
-            <OnePageSection>
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-black text-gray-950">전체 조 보기</h2>
-                <Button
-                  className="min-h-9 shrink-0 rounded-full px-3 py-1.5"
-                  onClick={() => setIsAllTeamsOpen((isOpen) => !isOpen)}
-                  variant="secondary"
-                >
-                  {isAllTeamsOpen ? "접기" : "보기"}
-                </Button>
-              </div>
-              {isAllTeamsOpen ? (
-                <div className="mt-3 space-y-2">
-                  {event.teams.length > 0 ? (
-                    event.teams.map((team) => (
-                      <div className="rounded-lg border border-gray-200 p-3" key={team.id}>
-                        <p className="text-sm font-black text-gray-950">{team.name}</p>
-                        <p className="mt-1 break-words text-xs leading-5 text-gray-600">
-                          {team.members.length > 0 ? team.members.join(", ") : "배정된 인원이 없습니다."}
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-500">
-                      등록된 조가 없습니다.
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </OnePageSection>
-          </div>
+          {response ? <MyAnswersPanel event={event} response={response} /> : null}
         </div>
       ) : null}
 
-      {eventType === "survey" && getSurveyKind(event) !== "activity" ? (
-        <OnePageSection>
-          <p className="text-xs font-bold text-brand-700">{eventTypeLabels[eventType]}</p>
-          <h1 className="mt-1 text-xl font-black text-gray-950">{event.title}</h1>
-          <p className="mt-2 text-sm leading-5 text-gray-600">
-            {event.status === "closed"
-              ? (event.resultSummary ?? "이벤트가 종료되었습니다.")
-              : "기존 설문 흐름을 사용해 응답을 저장합니다."}
-          </p>
-          {event.status === "active" ? (
-            <Button className="mt-4 min-h-10 w-full py-2" onClick={onOpenSurvey}>
-              {response ? "응답 수정하기" : "참여하기"}
-            </Button>
+      {isClosedSurvey ? (
+        <div className="space-y-3">
+          <OnePageSection>
+            <p className="text-xs font-bold text-brand-700">{eventTypeLabels[eventType]}</p>
+            <h1 className="mt-1 text-xl font-black text-gray-950">{event.title}</h1>
+            <p className="mt-2 text-sm leading-5 text-gray-600">
+              {event.resultSummary ?? "이벤트가 완료되었습니다. 제출한 답변과 조 배치 현황을 확인할 수 있습니다."}
+            </p>
+          </OnePageSection>
+
+          <MyAnswersPanel event={event} response={response} />
+
+          {event.requiresTeamAssignment ? (
+            <TeamAssignmentPanel
+              assignedTeam={assignedTeam}
+              event={event}
+              isAllTeamsOpen={isAllTeamsOpen}
+              onToggleAllTeams={() => setIsAllTeamsOpen((isOpen) => !isOpen)}
+            />
           ) : null}
-        </OnePageSection>
+        </div>
       ) : null}
 
       {isScoreModalOpen ? (
@@ -1646,10 +1773,20 @@ export const EventsPage = () => {
           visibleEvents.map((event) => {
             const response = responseByEventId.get(event.id);
             const hasSubmitted = Boolean(response);
+            const eventType = getEventType(event);
+            const isSurveyEvent = eventType === "survey";
+            const isWaitingSurvey = isSurveyEvent && event.status === "waiting";
+            const shouldOpenSurveyDirectly =
+              isSurveyEvent && event.status === "active" && !hasSubmitted;
             const assignedTeam = getAssignedTeam(event, participantName, response);
             const hasAssignedTeam = Boolean(assignedTeam);
             const isWaitingForTeam =
               event.status === "closed" && event.requiresTeamAssignment && !hasAssignedTeam;
+            const ctaLabel = shouldOpenSurveyDirectly
+              ? "상세 페이지 보기"
+              : event.status === "active" && hasSubmitted
+                ? "응답 확인하기"
+                : "상세 페이지 보기";
 
             return (
               <Card key={event.id}>
@@ -1682,6 +1819,11 @@ export const EventsPage = () => {
                         조 배정 대기 중
                       </p>
                     ) : null}
+                    {isWaitingSurvey ? (
+                      <p className="mt-2 text-xs font-bold text-gray-500">
+                        아직 진행 전입니다.
+                      </p>
+                    ) : null}
                   </div>
 
                   {hasSubmitted ? (
@@ -1699,12 +1841,18 @@ export const EventsPage = () => {
                       <ClipboardList className="h-4 w-4" />
                     ) : undefined
                   }
+                  disabled={isWaitingSurvey}
                   onClick={() => {
+                    if (shouldOpenSurveyDirectly) {
+                      setSurveyEventId(event.id);
+                      return;
+                    }
+
                     setDetailEventId(event.id);
                   }}
                   variant="secondary"
                 >
-                  상세 페이지 보기
+                  {ctaLabel}
                 </Button>
               </Card>
             );
