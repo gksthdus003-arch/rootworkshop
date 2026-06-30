@@ -1,12 +1,22 @@
 import { MapPin, Sparkles } from "lucide-react";
 import { Card } from "../../components/common/Card";
 import { useWorkshopStore } from "../../store/workshopStore";
+import type { RecommendationItem } from "../../types/workshop";
+
+const isNoticeRecommendation = (item: RecommendationItem) => {
+  const searchableText = `${item.id} ${item.title} ${item.category}`.toLowerCase();
+
+  return (
+    searchableText.includes("공지사항") ||
+    searchableText.includes("공지") ||
+    searchableText.includes("notice")
+  );
+};
 
 export const RecommendationsPage = () => {
   const { selectedGuide } = useWorkshopStore();
-  const visibleRecommendations = selectedGuide.recommendations.filter((item) => item.isVisible);
-  const bannerAnnouncements = selectedGuide.announcements.filter(
-    (announcement) => announcement.showOnHomeBanner,
+  const visibleRecommendations = selectedGuide.recommendations.filter(
+    (item) => item.isVisible && !isNoticeRecommendation(item),
   );
 
   return (
@@ -70,19 +80,6 @@ export const RecommendationsPage = () => {
         )}
       </div>
 
-      {bannerAnnouncements.length > 0 ? (
-        <div className="space-y-2">
-          {bannerAnnouncements.map((announcement) => (
-            <Card className="border-brand-100 bg-brand-50 shadow-none" key={announcement.id}>
-              <p className="text-xs font-bold text-brand-700">
-                {announcement.isImportant ? "중요 공지" : "공지"}
-              </p>
-              <h2 className="mt-1 font-bold text-brand-950">{announcement.title}</h2>
-              <p className="mt-1 text-sm leading-6 text-brand-900">{announcement.body}</p>
-            </Card>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
 };

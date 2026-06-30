@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { formatScheduleTime, sortScheduleByTime } from "../../lib/schedule";
+import { formatScheduleTime, getScheduleDateKey, sortScheduleByTime } from "../../lib/schedule";
 import { useCurrentSchedule } from "../../hooks/useCurrentSchedule";
 import { useWorkshopStore } from "../../store/workshopStore";
 import type { ScheduleItem } from "../../types/workshop";
@@ -41,12 +41,12 @@ const formatScheduleGroupLabel = (groupIndex: number, dateKey: string) => {
 };
 
 export const SchedulePage = () => {
-  const { scheduleFocusRequestId, selectedGuide } = useWorkshopStore();
+  const { refreshGuides, scheduleFocusRequestId, selectedGuide } = useWorkshopStore();
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const sortedSchedule = sortScheduleByTime(selectedGuide.schedule);
   const scheduleGroups = sortedSchedule.reduce<Array<{ dateKey: string; items: ScheduleItem[] }>>(
     (groups, schedule) => {
-      const dateKey = schedule.startAt.slice(0, 10);
+      const dateKey = getScheduleDateKey(schedule);
       const lastGroup = groups[groups.length - 1];
 
       if (lastGroup?.dateKey === dateKey) {
@@ -61,6 +61,12 @@ export const SchedulePage = () => {
   const { currentSchedule, displaySchedule, highlightScheduleId, isManualOverride, statusLabel } =
     useCurrentSchedule(selectedGuide.schedule, selectedGuide.scheduleControl);
   const focusScheduleId = highlightScheduleId ?? displaySchedule?.id;
+
+  useEffect(() => {
+    void refreshGuides().catch((error) => {
+      console.error("[schedule] failed to refresh guide data", error);
+    });
+  }, [refreshGuides]);
 
   useEffect(() => {
     if (!focusScheduleId) {

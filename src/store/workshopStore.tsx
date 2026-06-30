@@ -1,6 +1,7 @@
 import {
   createContext,
   type PropsWithChildren,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -109,6 +110,7 @@ interface WorkshopStoreValue {
   ) => void;
   deleteAnnouncement: (guideId: string, announcementId: string) => void;
   saveEventResponse: (response: EventSurveyResponse) => void;
+  refreshGuides: () => Promise<void>;
   unlockAdmin: (password: string) => Promise<boolean>;
   lockAdmin: () => void;
   changeAdminPassword: (password: string) => Promise<void>;
@@ -155,6 +157,23 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(() =>
     clientState.isAdminUnlocked(),
   );
+
+  const refreshGuides = useCallback(async () => {
+    const loadedGuides = await workshopApi.listGuides();
+
+    setGuides(loadedGuides);
+    setSelectedGuideId((current) => {
+      if (current && loadedGuides.some((guide) => guide.id === current)) {
+        return current;
+      }
+
+      return (
+        loadedGuides.find((guide) => guide.isDefault)?.id ??
+        loadedGuides[0]?.id ??
+        current
+      );
+    });
+  }, []);
 
   // Load shared data from the server on mount.
   useEffect(() => {
@@ -804,6 +823,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       updateAnnouncement,
       deleteAnnouncement,
       saveEventResponse,
+      refreshGuides,
       unlockAdmin,
       lockAdmin,
       changeAdminPassword,
@@ -816,6 +836,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     isAdminUnlocked,
     participantProfile,
     participants,
+    refreshGuides,
     scheduleFocusRequestId,
     selectedGuide,
     selectedGuideId,
