@@ -669,6 +669,7 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
     createGuide,
     defaultGuide,
     deleteEvent,
+    deleteEventResponse,
     deleteEventTeam,
     deleteGuide,
     deleteMapLocation,
@@ -4029,20 +4030,46 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                   {new Date(response.submittedAt).toLocaleString("ko-KR")}
                                 </p>
                               </div>
-                              <span
-                                className={cn(
-                                  "rounded-full px-2.5 py-1 text-xs font-bold",
-                                  responseManageEvent.requiresTeamAssignment
-                                    ? assignedTeam
-                                      ? "bg-brand-50 text-brand-700"
-                                      : "bg-yellow-100 text-yellow-800"
-                                    : "bg-gray-100 text-gray-600",
-                                )}
-                              >
-                                {isBowlingCompetitionManage
-                                  ? assignedTeam?.name ?? "미배정"
-                                  : getTeamAssignmentLabel(responseManageEvent, response)}
-                              </span>
+                              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                                <span
+                                  className={cn(
+                                    "rounded-full px-2.5 py-1 text-xs font-bold",
+                                    responseManageEvent.requiresTeamAssignment
+                                      ? assignedTeam
+                                        ? "bg-brand-50 text-brand-700"
+                                        : "bg-yellow-100 text-yellow-800"
+                                      : "bg-gray-100 text-gray-600",
+                                  )}
+                                >
+                                  {isBowlingCompetitionManage
+                                    ? assignedTeam?.name ?? "미배정"
+                                    : getTeamAssignmentLabel(responseManageEvent, response)}
+                                </span>
+                                <Button
+                                  className="min-h-8 px-2 py-1 text-xs"
+                                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        "이 참가자의 이벤트 응답을 삭제할까요? 삭제 후 복구할 수 없습니다.",
+                                      )
+                                    ) {
+                                      return;
+                                    }
+
+                                    void deleteEventResponse(response).catch((error) => {
+                                      console.error("[admin] failed to delete event response", {
+                                        response,
+                                        error,
+                                      });
+                                      window.alert("이벤트 응답 삭제에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+                                    });
+                                  }}
+                                  variant="danger"
+                                >
+                                  삭제
+                                </Button>
+                              </div>
                             </div>
 
                             <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">

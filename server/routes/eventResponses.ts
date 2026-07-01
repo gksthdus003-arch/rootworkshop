@@ -27,6 +27,8 @@ const readResponses = async (): Promise<EventSurveyResponse[]> => {
   return rows.map(rowToResponse);
 };
 
+const getNormalizedName = (name: string | undefined) => name?.trim() ?? "";
+
 const insertResponse = async (
   conn: { query: typeof pool.query },
   response: EventSurveyResponse,
@@ -44,6 +46,33 @@ const insertResponse = async (
       response.assignedTeamId ?? null,
       response.submittedAt,
       JSON.stringify(response.answers ?? {}),
+    ],
+  );
+};
+
+const updateResponse = async (
+  conn: { query: typeof pool.query },
+  response: EventSurveyResponse,
+): Promise<void> => {
+  await conn.query(
+    `UPDATE event_responses
+       SET guide_id = ?,
+           event_id = ?,
+           participant_id = ?,
+           participant_name = ?,
+           assigned_team_id = ?,
+           submitted_at = ?,
+           answers = ?
+     WHERE id = ?`,
+    [
+      response.guideId,
+      response.eventId,
+      response.participantId ?? null,
+      response.participantName,
+      response.assignedTeamId ?? null,
+      response.submittedAt,
+      JSON.stringify(response.answers ?? {}),
+      response.id,
     ],
   );
 };
@@ -76,25 +105,72 @@ eventResponsesRouter.put("/", async (req, res) => {
 });
 
 // Upsert a single response (mirrors saveEventResponse): same guide+event and
-// same participant (by id when present, otherwise by name) replaces the old row.
+// same participant updates the old row. participant_id is preferred, with a
+// trimmed participant_name fallback for legacy rows that do not have an id.
 eventResponsesRouter.post("/", async (req, res) => {
   const response = normalizeEventResponse(req.body as EventSurveyResponse);
+  const normalizedParticipantName = getNormalizedName(response.participantName);
 
   const conn = await pool.getConnection();
+  let savedResponse = response;
   try {
     await conn.beginTransaction();
-    if (response.participantId) {
-      await conn.query(
-        "DELETE FROM event_responses WHERE guide_id = ? AND event_id = ? AND participant_id = ?",
-        [response.guideId, response.eventId, response.participantId],
-      );
+
+    const [existingRows] = await conn.query<RowDataPacket[]>(
+      `SELECT * FROM event_responses
+       WHERE guide_id = ?
+         AND event_id = ?
+         AND (
+           id = ?
+           OR (? IS NOT NULL AND participant_id = ?)
+           OR TRIM(participant_name) = ?
+         )
+       ORDER BY
+         CASE
+           WHEN id = ? THEN 0
+           WHEN ? IS NOT NULL AND participant_id = ? THEN 1
+           ELSE 2
+         END,
+         submitted_at DESC`,
+      [
+        response.guideId,
+        response.eventId,
+        response.id,
+        response.participantId ?? null,
+        response.participantId ?? null,
+        normalizedParticipantName,
+        response.id,
+        response.participantId ?? null,
+        response.participantId ?? null,
+      ],
+    );
+
+    const existingResponse = existingRows[0] ? rowToResponse(existingRows[0]) : undefined;
+
+    if (existingResponse) {
+      savedResponse = {
+        ...existingResponse,
+        ...response,
+        id: existingResponse.id,
+        participantId: response.participantId ?? existingResponse.participantId,
+        participantName:
+          getNormalizedName(existingResponse.participantName) === normalizedParticipantName
+            ? existingResponse.participantName
+            : response.participantName,
+        assignedTeamId: response.assignedTeamId ?? existingResponse.assignedTeamId,
+        answers: {
+          ...(existingResponse.answers ?? {}),
+          ...(response.answers ?? {}),
+        },
+      };
+      await updateResponse(conn, savedResponse);
     } else {
-      await conn.query(
-        "DELETE FROM event_responses WHERE guide_id = ? AND event_id = ? AND participant_name = ?",
-        [response.guideId, response.eventId, response.participantName],
-      );
+      savedResponse = {
+        ...response,
+        participantName: response.participantName.trim(),
+      };
+      await insertResponse(conn, savedResponse);
     }
-    await insertResponse(conn, response);
     await conn.commit();
   } catch (error) {
     await conn.rollback();
@@ -103,5 +179,22 @@ eventResponsesRouter.post("/", async (req, res) => {
     conn.release();
   }
 
-  res.json(response);
+  res.json(savedResponse);
+});
+
+eventResponsesRouter.delete("/:responseId", async (req, res) => {
+  const { responseId } = req.params;
+
+  const [result] = await pool.query(
+    "DELETE FROM event_responses WHERE id = ? LIMIT 1",
+    [responseId],
+  );
+  const affectedRows = (result as { affectedRows?: number }).affectedRows ?? 0;
+
+  if (affectedRows === 0) {
+    res.status(404).json({ error: "event response not found" });
+    return;
+  }
+
+  res.status(204).end();
 });

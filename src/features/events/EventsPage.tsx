@@ -1674,13 +1674,14 @@ export const EventsPage = () => {
   const participantName = participantProfile?.name;
 
   const responseByEventId = useMemo(() => {
+    const normalizedParticipantName = getNormalizedParticipantName(participantName);
     const responses = eventResponses.filter(
       (response) =>
         response.guideId === selectedGuide.id &&
         (participantProfile?.id
           ? response.participantId === participantProfile.id ||
-            response.participantName === participantName
-          : response.participantName === participantName),
+            getNormalizedParticipantName(response.participantName) === normalizedParticipantName
+          : getNormalizedParticipantName(response.participantName) === normalizedParticipantName),
     );
 
     return new Map(responses.map((response) => [response.eventId, response]));

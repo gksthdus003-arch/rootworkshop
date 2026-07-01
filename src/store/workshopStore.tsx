@@ -110,6 +110,7 @@ interface WorkshopStoreValue {
   ) => void;
   deleteAnnouncement: (guideId: string, announcementId: string) => void;
   saveEventResponse: (response: EventSurveyResponse) => Promise<EventSurveyResponse>;
+  deleteEventResponse: (response: EventSurveyResponse) => Promise<void>;
   refreshGuides: () => Promise<void>;
   refreshEventResponses: () => Promise<void>;
   unlockAdmin: (password: string) => Promise<boolean>;
@@ -118,6 +119,30 @@ interface WorkshopStoreValue {
 }
 
 const WorkshopStoreContext = createContext<WorkshopStoreValue | null>(null);
+
+const getNormalizedParticipantName = (name: string | undefined) => name?.trim() ?? "";
+
+const isSameParticipantResponse = (
+  currentResponse: EventSurveyResponse,
+  targetResponse: EventSurveyResponse,
+) => {
+  if (currentResponse.guideId !== targetResponse.guideId || currentResponse.eventId !== targetResponse.eventId) {
+    return false;
+  }
+
+  if (targetResponse.id && currentResponse.id === targetResponse.id) {
+    return true;
+  }
+
+  if (targetResponse.participantId && currentResponse.participantId === targetResponse.participantId) {
+    return true;
+  }
+
+  const currentName = getNormalizedParticipantName(currentResponse.participantName);
+  const targetName = getNormalizedParticipantName(targetResponse.participantName);
+
+  return currentName !== "" && currentName === targetName;
+};
 
 const getInitialActiveTab = (): BottomTabId => {
   if (typeof window === "undefined") {
@@ -763,24 +788,40 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     };
 
     const saveEventResponse = async (response: EventSurveyResponse) => {
+      const existingResponse = eventResponses.find((currentResponse) =>
+        isSameParticipantResponse(currentResponse, response),
+      );
+
+      console.info("[workshopStore] saveEventResponse upsert", {
+        mode: existingResponse ? "update-existing-response" : "create-new-response",
+        eventId: response.eventId,
+        participantId: response.participantId,
+        participantName: response.participantName,
+        normalizedParticipantName: getNormalizedParticipantName(response.participantName),
+        existingResponseFound: Boolean(existingResponse),
+        existingResponseId: existingResponse?.id,
+        existingAnswers: existingResponse?.answers,
+        payload: response,
+      });
+
       const savedResponse = await workshopApi.saveEventResponse(response);
 
       setEventResponses((responses) => {
         const nextResponses = responses.filter(
-          (currentResponse) =>
-            !(
-              currentResponse.guideId === savedResponse.guideId &&
-              currentResponse.eventId === savedResponse.eventId &&
-              (savedResponse.participantId
-                ? currentResponse.participantId === savedResponse.participantId
-                : currentResponse.participantName === savedResponse.participantName)
-            ),
+          (currentResponse) => !isSameParticipantResponse(currentResponse, savedResponse),
         );
 
         return [...nextResponses, savedResponse];
       });
 
       return savedResponse;
+    };
+
+    const deleteEventResponse = async (response: EventSurveyResponse) => {
+      await workshopApi.deleteEventResponse(response.id);
+      setEventResponses((responses) =>
+        responses.filter((currentResponse) => currentResponse.id !== response.id),
+      );
     };
 
     const changeAdminPassword = async (password: string) => {
@@ -832,6 +873,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       updateAnnouncement,
       deleteAnnouncement,
       saveEventResponse,
+      deleteEventResponse,
       refreshGuides,
       refreshEventResponses,
       unlockAdmin,

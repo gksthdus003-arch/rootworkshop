@@ -149,6 +149,37 @@ export const workshopApi = {
       throw error;
     }
   },
+  deleteEventResponse: async (responseId: string) => {
+    const endpoint = `${EVENT_RESPONSES_ENDPOINT}/${encodeURIComponent(responseId)}`;
+
+    const apiResponse = await fetch(endpoint, {
+      method: "DELETE",
+    }).catch((error) => {
+      console.error("[workshopApi] deleteEventResponse network failure", {
+        endpoint,
+        responseId,
+        status: "network-error",
+        error,
+        hint: "로컬 API 서버 또는 SQL DB 연결이 준비되지 않았을 수 있습니다.",
+      });
+      throw error;
+    });
+
+    if (!apiResponse.ok) {
+      const responseBody = await apiResponse.text().catch(() => "");
+      console.error("[workshopApi] deleteEventResponse failed", {
+        endpoint,
+        responseId,
+        status: apiResponse.status,
+        responseBody,
+      });
+      throw new Error(
+        `API ${EVENT_RESPONSES_PATH}/${responseId} failed (${apiResponse.status}): ${
+          responseBody || apiResponse.statusText
+        }`,
+      );
+    }
+  },
 
   getEventOverrides: () =>
     request<Record<string, EventItem[]>>("/event-overrides"),
