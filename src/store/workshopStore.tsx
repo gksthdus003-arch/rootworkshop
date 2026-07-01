@@ -122,6 +122,36 @@ const WorkshopStoreContext = createContext<WorkshopStoreValue | null>(null);
 
 const getNormalizedParticipantName = (name: string | undefined) => name?.trim() ?? "";
 
+const getNormalizedMemberKey = (member: string | undefined) => getNormalizedParticipantName(member);
+
+const getUniqueNormalizedMembers = (members: string[]) => {
+  const seen = new Set<string>();
+
+  return members.filter((member) => {
+    const key = getNormalizedMemberKey(member);
+
+    if (!key || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
+const stripMembersFromTeams = (
+  teams: EventTeam[],
+  memberKeys: string[],
+  keepTeamId?: string,
+) =>
+  teams.map((team) => ({
+    ...team,
+    members:
+      team.id === keepTeamId
+        ? team.members
+        : team.members.filter((member) => !memberKeys.includes(getNormalizedMemberKey(member))),
+  }));
+
 const isSameParticipantResponse = (
   currentResponse: EventSurveyResponse,
   targetResponse: EventSurveyResponse,
@@ -597,8 +627,11 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
             return response;
           }
 
+          const normalizedResponseName = getNormalizedParticipantName(response.participantName);
           const assignedTeam = teams.find((team) =>
-            team.members.includes(response.participantName),
+            team.members.some(
+              (member) => getNormalizedMemberKey(member) === normalizedResponseName,
+            ),
           );
 
           return {
@@ -615,7 +648,15 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     const addEventTeam = (guideId: string, eventId: string, team: EventTeam) => {
       const guide = guides.find((item) => item.id === guideId);
       const event = guide?.events.find((item) => item.id === eventId);
-      const nextTeams = [...(event?.teams ?? []), team];
+      const normalizedTeam = {
+        ...team,
+        members: getUniqueNormalizedMembers(team.members.map((member) => getNormalizedParticipantName(member))),
+      };
+      const nextTeams = stripMembersFromTeams(
+        [...(event?.teams ?? []), normalizedTeam],
+        normalizedTeam.members.map(getNormalizedMemberKey),
+        normalizedTeam.id,
+      );
 
       updateGuideById(guideId, (guide) => ({
         ...guide,
@@ -623,7 +664,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
           event.id === eventId
             ? {
                 ...event,
-                teams: [...event.teams, team],
+                teams: nextTeams,
               }
             : event,
         ),
@@ -639,8 +680,24 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     ) => {
       const guide = guides.find((item) => item.id === guideId);
       const event = guide?.events.find((item) => item.id === eventId);
-      const nextTeams = (event?.teams ?? []).map((team) =>
-        team.id === teamId ? { ...team, ...updates } : team,
+      const updatedTeam = (event?.teams ?? []).find((team) => team.id === teamId);
+      const normalizedMembers = getUniqueNormalizedMembers(
+        (updates.members ?? updatedTeam?.members ?? []).map((member) =>
+          getNormalizedParticipantName(member),
+        ),
+      );
+      const nextTeams = stripMembersFromTeams(
+        (event?.teams ?? []).map((team) =>
+          team.id === teamId
+            ? {
+                ...team,
+                ...updates,
+                members: normalizedMembers,
+              }
+            : team,
+        ),
+        normalizedMembers.map(getNormalizedMemberKey),
+        teamId,
       );
 
       updateGuideById(guideId, (guide) => ({
@@ -649,9 +706,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
           event.id === eventId
             ? {
                 ...event,
-                teams: event.teams.map((team) =>
-                  team.id === teamId ? { ...team, ...updates } : team,
-                ),
+                teams: nextTeams,
               }
             : event,
         ),
@@ -684,6 +739,8 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       participantName: string,
       teamId?: string,
     ) => {
+      const normalizedParticipantName = getNormalizedParticipantName(participantName);
+
       updateGuideById(guideId, (guide) => ({
         ...guide,
         events: guide.events.map((event) => {
@@ -691,21 +748,22 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
             return event;
           }
 
+          const nextTeams = stripMembersFromTeams(
+            event.teams,
+            [normalizedParticipantName],
+            teamId,
+          ).map((team) =>
+            team.id === teamId
+              ? {
+                  ...team,
+                  members: getUniqueNormalizedMembers([...team.members, normalizedParticipantName]),
+                }
+              : team,
+          );
+
           return {
             ...event,
-            teams: event.teams.map((team) => {
-              const membersWithoutParticipant = team.members.filter(
-                (member) => member !== participantName,
-              );
-
-              return {
-                ...team,
-                members:
-                  team.id === teamId
-                    ? [...membersWithoutParticipant, participantName]
-                    : membersWithoutParticipant,
-              };
-            }),
+            teams: nextTeams,
           };
         }),
       }));
@@ -714,7 +772,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
         const nextResponses = responses.map((response) =>
           response.guideId === guideId &&
           response.eventId === eventId &&
-          response.participantName === participantName
+          getNormalizedParticipantName(response.participantName) === normalizedParticipantName
             ? {
                 ...response,
                 assignedTeamId: teamId,

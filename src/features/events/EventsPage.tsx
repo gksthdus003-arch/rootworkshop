@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardList,
   PartyPopper,
+  RefreshCw,
   Users,
 } from "lucide-react";
 import { Button } from "../../components/common/Button";
@@ -658,15 +659,14 @@ const getAssignedTeam = (
   participantName?: string,
   response?: EventSurveyResponse,
 ) => {
-  const normalizedParticipantName = participantName?.trim();
+  const currentTeam = response
+    ? resolveCurrentTeam(event.teams, response.participantId, participantName ?? response.participantName, [
+        response,
+      ])
+    : undefined;
 
   return (
-    event.teams.find((team) => team.id === response?.assignedTeamId) ??
-    event.teams.find((team) =>
-      normalizedParticipantName
-        ? team.members.some((member) => member.trim() === normalizedParticipantName)
-        : false,
-    )
+    currentTeam ?? event.teams.find((team) => team.id === response?.assignedTeamId)
   );
 };
 
@@ -822,6 +822,68 @@ const isSameParticipantResponse = (left: EventSurveyResponse, right: EventSurvey
   );
 };
 
+const resolveCurrentTeam = (
+  teams: EventItem["teams"],
+  participantId: string | undefined,
+  participantName: string | undefined,
+  responses: EventSurveyResponse[] = [],
+) => {
+  const participantNameFromId = participantId
+    ? responses.find((response) => response.participantId === participantId)?.participantName
+    : undefined;
+  const normalizedParticipantName = getNormalizedParticipantName(participantName);
+  const normalizedParticipantNameFromId = getNormalizedParticipantName(participantNameFromId);
+
+  return (
+    teams.find((team) =>
+      normalizedParticipantNameFromId
+        ? team.members.some((member) => member.trim() === normalizedParticipantNameFromId)
+        : false,
+    ) ??
+    teams.find((team) =>
+      normalizedParticipantName
+        ? team.members.some((member) => member.trim() === normalizedParticipantName)
+        : false,
+    )
+  );
+};
+
+const resolveBowlingResponseTeam = (
+  event: EventItem,
+  response: EventSurveyResponse,
+  responses: EventSurveyResponse[] = [],
+) => {
+  const currentTeam =
+    resolveCurrentTeam(event.teams, response.participantId, response.participantName, responses) ??
+    undefined;
+  const fallbackTeam = event.teams.find((team) => team.id === response.assignedTeamId);
+
+  const resolvedTeam = currentTeam ?? fallbackTeam;
+  const matchedTeams = event.teams.filter((team) =>
+    team.members.some((member) =>
+      member.trim() === getNormalizedParticipantName(response.participantName),
+    ),
+  );
+
+  if (resolvedTeam) {
+    console.info("[events] resolveBowlingResponseTeam", {
+      participantName: response.participantName,
+      participantId: response.participantId,
+      game1Score: response.answers?.game1Score,
+      game2Score: response.answers?.game2Score,
+      responseAssignedTeamId: response.assignedTeamId,
+      matchedTeams: matchedTeams.map((team) => ({ id: team.id, name: team.name })),
+      currentTeamId: currentTeam?.id,
+      currentTeamName: currentTeam?.name,
+      resolvedTeamId: resolvedTeam.id,
+      resolvedTeamName: resolvedTeam.name,
+      duplicateMatched: matchedTeams.length > 1,
+    });
+  }
+
+  return resolvedTeam;
+};
+
 const findParticipantResponse = (
   responses: EventSurveyResponse[],
   participantResponse: EventSurveyResponse,
@@ -836,15 +898,12 @@ const getBowlingTeamRankings = (
     .map((team, index) => {
       const teamScoreResponses = scoreResponses.filter((scoreResponse) => {
         const teamResponse = findParticipantResponse(teamResponses, scoreResponse);
-        const responseName = getNormalizedParticipantName(
-          teamResponse?.participantName ?? scoreResponse.participantName,
-        );
+        const resolvedTeam = resolveBowlingResponseTeam(teamSourceEvent, {
+          ...scoreResponse,
+          participantName: teamResponse?.participantName ?? scoreResponse.participantName,
+        }, [...teamResponses, ...scoreResponses]);
 
-        return (
-          teamResponse?.assignedTeamId === team.id ||
-          scoreResponse.assignedTeamId === team.id ||
-          team.members.some((member) => member.trim() === responseName)
-        );
+        return resolvedTeam?.id === team.id;
       });
 
       return {
@@ -1221,8 +1280,10 @@ interface BowlingEventBoardPageProps {
   game2Score?: number;
   hasAnyScore: boolean;
   hasSubmittedPreSurvey: boolean;
+  isRefreshingRankings: boolean;
   myTeamRank: number;
   onLevelTestOpen: () => void;
+  onRankingsRefresh: () => void;
   onScoreInputOpen: () => void;
   phase: string;
   rankings: ReturnType<typeof getBowlingTeamRankings>;
@@ -1238,8 +1299,10 @@ const BowlingEventBoardPage = ({
   game2Score,
   hasAnyScore,
   hasSubmittedPreSurvey,
+  isRefreshingRankings,
   myTeamRank,
   onLevelTestOpen,
+  onRankingsRefresh,
   onScoreInputOpen,
   phase,
   rankings,
@@ -1376,6 +1439,18 @@ const BowlingEventBoardPage = ({
           minHeight: bowlingEventOverlay.rankingTable.height,
         }}
       >
+        {!isPreSurvey ? (
+          <button
+            aria-label="순위 새로고침"
+            className="absolute right-1 top-0.5 z-20 inline-flex h-5 min-w-5 items-center justify-center rounded bg-white/90 px-1 text-[10px] font-black leading-none text-violet-800 ring-1 ring-violet-200 transition hover:bg-violet-50 disabled:opacity-60"
+            disabled={isRefreshingRankings}
+            onClick={onRankingsRefresh}
+            title={isRefreshingRankings ? "업데이트 중..." : "순위 새로고침"}
+            type="button"
+          >
+            {isRefreshingRankings ? "..." : <RefreshCw className="h-3 w-3" />}
+          </button>
+        ) : null}
         <table className="w-full table-fixed border-collapse text-center font-bold leading-tight text-gray-950">
           <colgroup>
             <col className="w-[15%]" />
@@ -1443,6 +1518,7 @@ interface EventOnePageProps {
   responseByEventId: Map<string, EventSurveyResponse>;
   onBack: () => void;
   onOpenSurvey: () => void;
+  onRefreshResponses: () => Promise<void>;
   onSaveResponse: (response: EventSurveyResponse) => Promise<EventSurveyResponse>;
 }
 
@@ -1456,11 +1532,13 @@ const EventOnePage = ({
   responseByEventId,
   onBack,
   onOpenSurvey,
+  onRefreshResponses,
   onSaveResponse,
 }: EventOnePageProps) => {
   const [isAllTeamsOpen, setIsAllTeamsOpen] = useState(false);
   const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
   const [isLevelTestModalOpen, setIsLevelTestModalOpen] = useState(false);
+  const [isRefreshingRankings, setIsRefreshingRankings] = useState(false);
   const eventType = getEventType(event);
   const shouldRenderBowlingBoard = isBowlingEvent(event);
   const surveyKind = getSurveyKind(event);
@@ -1513,6 +1591,31 @@ const EventOnePage = ({
       : 0;
   const hasAnyScore = game1Score !== undefined || game2Score !== undefined;
   const hasSubmittedPreSurvey = Boolean(levelSurveyResponse ?? response);
+  const refreshBowlingRankings = async () => {
+    setIsRefreshingRankings(true);
+
+    try {
+      await onRefreshResponses();
+    } catch (error) {
+      console.error("[events] failed to refresh bowling rankings", {
+        endpoint: "/api/event-responses",
+        eventId: event.id,
+        error,
+      });
+      window.alert("순위 업데이트에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setIsRefreshingRankings(false);
+    }
+  };
+  const saveBowlingResponse = async (nextResponse: EventSurveyResponse) => {
+    const savedResponse = await onSaveResponse(nextResponse);
+
+    if (shouldRenderBowlingBoard) {
+      await refreshBowlingRankings();
+    }
+
+    return savedResponse;
+  };
   const saveLevelTestAnswers = (answers: Record<string, string | string[]>) => {
     if (!participantProfile?.name) {
       return;
@@ -1554,8 +1657,12 @@ const EventOnePage = ({
           game2Score={game2Score}
           hasAnyScore={hasAnyScore}
           hasSubmittedPreSurvey={hasSubmittedPreSurvey}
+          isRefreshingRankings={isRefreshingRankings}
           myTeamRank={myTeamRank}
           onLevelTestOpen={() => setIsLevelTestModalOpen(true)}
+          onRankingsRefresh={() => {
+            void refreshBowlingRankings();
+          }}
           onScoreInputOpen={() => setIsScoreModalOpen(true)}
           phase={phase}
           rankings={rankings}
@@ -1648,7 +1755,7 @@ const EventOnePage = ({
           event={event}
           guideId={guideId}
           onClose={() => setIsScoreModalOpen(false)}
-          onSave={onSaveResponse}
+          onSave={saveBowlingResponse}
           participantProfile={participantProfile}
           response={response}
         />
@@ -1667,11 +1774,21 @@ const EventOnePage = ({
 };
 
 export const EventsPage = () => {
-  const { eventResponses, participantProfile, saveEventResponse, selectedGuide } =
+  const {
+    eventResponses,
+    participantProfile,
+    refreshEventResponses,
+    refreshGuides,
+    saveEventResponse,
+    selectedGuide,
+  } =
     useWorkshopStore();
   const [detailEventId, setDetailEventId] = useState<string>();
   const [surveyEventId, setSurveyEventId] = useState<string>();
   const participantName = participantProfile?.name;
+  const refreshBowlingData = async () => {
+    await Promise.all([refreshEventResponses(), refreshGuides()]);
+  };
 
   const responseByEventId = useMemo(() => {
     const normalizedParticipantName = getNormalizedParticipantName(participantName);
@@ -1753,6 +1870,7 @@ export const EventsPage = () => {
         guideId={selectedGuide.id}
         onBack={() => setDetailEventId(undefined)}
         onOpenSurvey={() => setSurveyEventId(detailEvent.id)}
+        onRefreshResponses={refreshBowlingData}
         onSaveResponse={saveEventResponse}
         participantProfile={participantProfile}
         response={responseByEventId.get(detailEvent.id)}

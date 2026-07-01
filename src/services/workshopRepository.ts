@@ -83,7 +83,50 @@ export const workshopApi = {
     return { ok: true, participants: (await response.json()) as ParticipantProfile[] };
   },
 
-  listEventResponses: () => request<EventSurveyResponse[]>("/event-responses"),
+  listEventResponses: async () => {
+    const apiResponse = await fetch(EVENT_RESPONSES_ENDPOINT).catch((error) => {
+      console.error("[workshopApi] listEventResponses network failure", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        status: "network-error",
+        error,
+      });
+      throw error;
+    });
+
+    const responseBody = await apiResponse.text().catch((error) => {
+      console.error("[workshopApi] listEventResponses response read failure", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        status: apiResponse.status,
+        error,
+      });
+      return "";
+    });
+
+    if (!apiResponse.ok) {
+      console.error("[workshopApi] listEventResponses failed", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        status: apiResponse.status,
+        responseBody,
+      });
+      throw new Error(
+        `API ${EVENT_RESPONSES_PATH} failed (${apiResponse.status}): ${
+          responseBody || apiResponse.statusText
+        }`,
+      );
+    }
+
+    try {
+      return JSON.parse(responseBody) as EventSurveyResponse[];
+    } catch (error) {
+      console.error("[workshopApi] listEventResponses invalid JSON response", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        status: apiResponse.status,
+        responseBody,
+        error,
+      });
+      throw error;
+    }
+  },
   saveEventResponses: (responses: EventSurveyResponse[]) =>
     request<EventSurveyResponse[]>("/event-responses", {
       method: "PUT",

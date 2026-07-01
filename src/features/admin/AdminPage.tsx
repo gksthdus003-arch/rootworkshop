@@ -311,9 +311,16 @@ const getNextPosterVersion = (version: string) => {
 const formatAnswerValue = (value: string | string[] | number) =>
   Array.isArray(value) ? value.join(", ") : String(value);
 
-const getEventResponseTeam = (event: EventItem, response: EventSurveyResponse) =>
+const getEventResponseTeam = (
+  event: EventItem,
+  response: EventSurveyResponse,
+  responses: EventSurveyResponse[] = [],
+) =>
+  resolveCurrentTeam(event.teams, response.participantId, response.participantName, responses) ??
   event.teams.find((team) => team.id === response.assignedTeamId) ??
-  event.teams.find((team) => team.members.includes(response.participantName));
+  event.teams.find((team) =>
+    team.members.some((member) => member.trim() === getNormalizedParticipantName(response.participantName)),
+  );
 
 const getTeamAssignmentLabel = (event: EventItem, response: EventSurveyResponse) => {
   if (!event.requiresTeamAssignment) {
@@ -412,6 +419,63 @@ const formatTargetDiff = (score: number | undefined, targetScore: number | undef
 
 const getNormalizedParticipantName = (name: string | undefined) => name?.trim() ?? "";
 
+const resolveCurrentTeam = (
+  teams: EventItem["teams"],
+  participantId: string | undefined,
+  participantName: string | undefined,
+  responses: EventSurveyResponse[] = [],
+) => {
+  const participantNameFromId = participantId
+    ? responses.find((response) => response.participantId === participantId)?.participantName
+    : undefined;
+  const normalizedParticipantName = getNormalizedParticipantName(participantName);
+  const normalizedParticipantNameFromId = getNormalizedParticipantName(participantNameFromId);
+
+  return (
+    teams.find((team) =>
+      normalizedParticipantNameFromId
+        ? team.members.some((member) => member.trim() === normalizedParticipantNameFromId)
+        : false,
+    ) ??
+    teams.find((team) =>
+      normalizedParticipantName
+        ? team.members.some((member) => member.trim() === normalizedParticipantName)
+        : false,
+    )
+  );
+};
+
+const resolveBowlingResponseTeam = (
+  event: EventItem,
+  response: EventSurveyResponse,
+  responses: EventSurveyResponse[] = [],
+) => {
+  const currentTeam = resolveCurrentTeam(event.teams, response.participantId, response.participantName, responses);
+  const fallbackTeam = event.teams.find((team) => team.id === response.assignedTeamId);
+  const resolvedTeam = currentTeam ?? fallbackTeam;
+  const matchedTeams = event.teams.filter((team) =>
+    team.members.some((member) => member.trim() === getNormalizedParticipantName(response.participantName)),
+  );
+
+  if (resolvedTeam) {
+    console.info("[admin] resolveBowlingResponseTeam", {
+      participantName: response.participantName,
+      participantId: response.participantId,
+      game1Score: response.answers?.game1Score,
+      game2Score: response.answers?.game2Score,
+      responseAssignedTeamId: response.assignedTeamId,
+      matchedTeams: matchedTeams.map((team) => ({ id: team.id, name: team.name })),
+      currentTeamId: currentTeam?.id,
+      currentTeamName: currentTeam?.name,
+      resolvedTeamId: resolvedTeam.id,
+      resolvedTeamName: resolvedTeam.name,
+      duplicateMatched: matchedTeams.length > 1,
+    });
+  }
+
+  return resolvedTeam;
+};
+
 const isSameParticipantResponse = (left: EventSurveyResponse, right: EventSurveyResponse) => {
   if (left.participantId && right.participantId) {
     return left.participantId === right.participantId;
@@ -436,18 +500,19 @@ const getBowlingTeamRankings = (
 ) =>
   teamSourceEvent.teams
     .map((team, index) => {
-      const teamScoreResponses = scoreResponses.filter((scoreResponse) => {
-        const teamResponse = findParticipantResponse(teamResponses, scoreResponse);
-        const responseName = getNormalizedParticipantName(
-          teamResponse?.participantName ?? scoreResponse.participantName,
-        );
+        const teamScoreResponses = scoreResponses.filter((scoreResponse) => {
+          const teamResponse = findParticipantResponse(teamResponses, scoreResponse);
+          const resolvedTeam = resolveBowlingResponseTeam(
+            teamSourceEvent,
+            {
+              ...scoreResponse,
+              participantName: teamResponse?.participantName ?? scoreResponse.participantName,
+            },
+            [...teamResponses, ...scoreResponses],
+          );
 
-        return (
-          teamResponse?.assignedTeamId === team.id ||
-          scoreResponse.assignedTeamId === team.id ||
-          team.members.some((member) => member.trim() === responseName)
-        );
-      });
+          return resolvedTeam?.id === team.id;
+        });
 
       return {
         team,
@@ -840,7 +905,9 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
       seenNames.add(member);
 
       const assignedTeam = event.teams.find(
-        (team) => team.id !== teamId && team.members.includes(member),
+        (team) =>
+          team.id !== teamId &&
+          team.members.some((teamMember) => teamMember.trim() === member.trim()),
       );
 
       if (assignedTeam) {
@@ -3748,9 +3815,17 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                   Number.isFinite(targetScoreNumber) && targetScoreText !== ""
                                     ? targetScoreNumber
                                     : undefined;
-                                const assignedTeam = levelResponse
-                                  ? getEventResponseTeam(bowlingTeamSourceEvent, levelResponse)
-                                  : getEventResponseTeam(bowlingTeamSourceEvent, response);
+                        const assignedTeam = levelResponse
+                          ? getEventResponseTeam(
+                              bowlingTeamSourceEvent,
+                              levelResponse,
+                              linkedBowlingSurveyResponses,
+                            )
+                          : getEventResponseTeam(
+                              bowlingTeamSourceEvent,
+                              response,
+                              responseManageEventResponses,
+                            );
 
                                 return (
                                   <div
@@ -3992,8 +4067,16 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                             : undefined;
                         const assignedTeam = isBowlingCompetitionManage
                           ? levelResponse
-                            ? getEventResponseTeam(bowlingTeamSourceEvent, levelResponse)
-                            : getEventResponseTeam(bowlingTeamSourceEvent, response)
+                            ? getEventResponseTeam(
+                                bowlingTeamSourceEvent,
+                                levelResponse,
+                                linkedBowlingSurveyResponses,
+                              )
+                            : getEventResponseTeam(
+                                bowlingTeamSourceEvent,
+                                response,
+                                responseManageEventResponses,
+                              )
                           : getEventResponseTeam(responseManageEvent, response);
                         const game1Score = getNumericResponseAnswer(response, "game1Score");
                         const game2Score = getNumericResponseAnswer(response, "game2Score");
