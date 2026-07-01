@@ -109,8 +109,9 @@ interface WorkshopStoreValue {
     updates: Partial<AnnouncementItem>,
   ) => void;
   deleteAnnouncement: (guideId: string, announcementId: string) => void;
-  saveEventResponse: (response: EventSurveyResponse) => void;
+  saveEventResponse: (response: EventSurveyResponse) => Promise<EventSurveyResponse>;
   refreshGuides: () => Promise<void>;
+  refreshEventResponses: () => Promise<void>;
   unlockAdmin: (password: string) => Promise<boolean>;
   lockAdmin: () => void;
   changeAdminPassword: (password: string) => Promise<void>;
@@ -173,6 +174,11 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
         current
       );
     });
+  }, []);
+
+  const refreshEventResponses = useCallback(async () => {
+    const loadedResponses = await workshopApi.listEventResponses();
+    setEventResponses(loadedResponses);
   }, []);
 
   // Load shared data from the server on mount.
@@ -756,22 +762,25 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       }));
     };
 
-    const saveEventResponse = (response: EventSurveyResponse) => {
+    const saveEventResponse = async (response: EventSurveyResponse) => {
+      const savedResponse = await workshopApi.saveEventResponse(response);
+
       setEventResponses((responses) => {
         const nextResponses = responses.filter(
-          (savedResponse) =>
+          (currentResponse) =>
             !(
-              savedResponse.guideId === response.guideId &&
-              savedResponse.eventId === response.eventId &&
-              (response.participantId
-                ? savedResponse.participantId === response.participantId
-                : savedResponse.participantName === response.participantName)
+              currentResponse.guideId === savedResponse.guideId &&
+              currentResponse.eventId === savedResponse.eventId &&
+              (savedResponse.participantId
+                ? currentResponse.participantId === savedResponse.participantId
+                : currentResponse.participantName === savedResponse.participantName)
             ),
         );
 
-        return [...nextResponses, response];
+        return [...nextResponses, savedResponse];
       });
-      void workshopApi.saveEventResponse(response);
+
+      return savedResponse;
     };
 
     const changeAdminPassword = async (password: string) => {
@@ -824,6 +833,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
       deleteAnnouncement,
       saveEventResponse,
       refreshGuides,
+      refreshEventResponses,
       unlockAdmin,
       lockAdmin,
       changeAdminPassword,
@@ -837,6 +847,7 @@ export const WorkshopProvider = ({ children }: PropsWithChildren) => {
     participantProfile,
     participants,
     refreshGuides,
+    refreshEventResponses,
     scheduleFocusRequestId,
     selectedGuide,
     selectedGuideId,

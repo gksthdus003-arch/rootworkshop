@@ -9,6 +9,8 @@ import type {
 } from "../types/workshop";
 
 const API_BASE = "/api";
+const EVENT_RESPONSES_PATH = "/event-responses";
+const EVENT_RESPONSES_ENDPOINT = `${API_BASE}${EVENT_RESPONSES_PATH}`;
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -87,11 +89,66 @@ export const workshopApi = {
       method: "PUT",
       body: JSON.stringify(responses),
     }),
-  saveEventResponse: (response: EventSurveyResponse) =>
-    request<EventSurveyResponse>("/event-responses", {
+  saveEventResponse: async (response: EventSurveyResponse) => {
+    const payload = response;
+    const body = JSON.stringify(payload);
+
+    const apiResponse = await fetch(EVENT_RESPONSES_ENDPOINT, {
       method: "POST",
-      body: JSON.stringify(response),
-    }),
+      headers: { "content-type": "application/json" },
+      body,
+    }).catch((error) => {
+      console.error("[workshopApi] saveEventResponse network failure", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        payload,
+        status: "network-error",
+        error,
+        hint: "로컬 API 서버 또는 SQL DB 연결이 준비되지 않았을 수 있습니다.",
+      });
+      throw error;
+    });
+
+    const responseBody = await apiResponse.text().catch((error) => {
+      console.error("[workshopApi] saveEventResponse response read failure", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        payload,
+        status: apiResponse.status,
+        error,
+      });
+      return "";
+    });
+
+    if (!apiResponse.ok) {
+      console.error("[workshopApi] saveEventResponse failed", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        payload,
+        status: apiResponse.status,
+        responseBody,
+        hint:
+          apiResponse.status >= 500
+            ? "서버 내부 오류입니다. 로컬 환경이면 SQL DB 연결 상태를 확인하세요."
+            : "요청 payload 또는 API 응답을 확인하세요.",
+      });
+      throw new Error(
+        `API ${EVENT_RESPONSES_PATH} failed (${apiResponse.status}): ${
+          responseBody || apiResponse.statusText
+        }`,
+      );
+    }
+
+    try {
+      return JSON.parse(responseBody) as EventSurveyResponse;
+    } catch (error) {
+      console.error("[workshopApi] saveEventResponse invalid JSON response", {
+        endpoint: EVENT_RESPONSES_ENDPOINT,
+        payload,
+        status: apiResponse.status,
+        responseBody,
+        error,
+      });
+      throw error;
+    }
+  },
 
   getEventOverrides: () =>
     request<Record<string, EventItem[]>>("/event-overrides"),

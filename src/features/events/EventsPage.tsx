@@ -1081,7 +1081,7 @@ interface ScoreInputModalProps {
   participantProfile?: ParticipantProfile;
   response?: EventSurveyResponse;
   onClose: () => void;
-  onSave: (response: EventSurveyResponse) => void;
+  onSave: (response: EventSurveyResponse) => Promise<EventSurveyResponse>;
 }
 
 const ScoreInputModal = ({
@@ -1096,6 +1096,7 @@ const ScoreInputModal = ({
   const [game1Score, setGame1Score] = useState(getTextAnswer(response, "game1Score"));
   const [game2Score, setGame2Score] = useState(getTextAnswer(response, "game2Score"));
   const [errorMessage, setErrorMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const updateNumericText = (value: string, setter: (nextValue: string) => void) => {
     setter(value.replace(/\D/g, ""));
@@ -1111,7 +1112,7 @@ const ScoreInputModal = ({
     return Number.isInteger(score) && score >= 0 && score <= 300;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!participantProfile?.name) {
       setErrorMessage("이름 입력 후 점수를 저장할 수 있습니다.");
       return;
@@ -1122,22 +1123,32 @@ const ScoreInputModal = ({
       return;
     }
 
-    onSave({
-      id: response?.id ?? createId(),
-      guideId,
-      eventId: event.id,
-      participantId: participantProfile.id,
-      participantName: participantProfile.name,
-      submittedAt: new Date().toISOString(),
-      assignedTeamId:
-        assignedTeam?.id ?? response?.assignedTeamId ?? getAssignedTeam(event, participantProfile.name)?.id,
-      answers: {
-        ...(response?.answers ?? {}),
-        game1Score: game1Score === "" ? "" : Number(game1Score),
-        game2Score: game2Score === "" ? "" : Number(game2Score),
-      },
-    });
-    onClose();
+    setErrorMessage("");
+    setIsSaving(true);
+
+    try {
+      await onSave({
+        id: response?.id ?? createId(),
+        guideId,
+        eventId: event.id,
+        participantId: participantProfile.id,
+        participantName: participantProfile.name,
+        submittedAt: new Date().toISOString(),
+        assignedTeamId:
+          assignedTeam?.id ?? response?.assignedTeamId ?? getAssignedTeam(event, participantProfile.name)?.id,
+        answers: {
+          ...(response?.answers ?? {}),
+          game1Score: game1Score === "" ? "" : Number(game1Score),
+          game2Score: game2Score === "" ? "" : Number(game2Score),
+        },
+      });
+      onClose();
+    } catch (error) {
+      console.error("[events] failed to save bowling score", error);
+      setErrorMessage("점수 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -1189,10 +1200,12 @@ const ScoreInputModal = ({
           </p>
         ) : null}
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button onClick={onClose} variant="secondary">
+          <Button disabled={isSaving} onClick={onClose} variant="secondary">
             취소
           </Button>
-          <Button onClick={handleSave}>저장</Button>
+          <Button disabled={isSaving} onClick={handleSave}>
+            {isSaving ? "저장 중" : "저장"}
+          </Button>
         </div>
       </div>
     </div>
@@ -1308,10 +1321,10 @@ const BowlingEventBoardPage = ({
       />
 
       <div
-        className="absolute z-10 flex items-center justify-center px-4 text-center text-[clamp(25px,3.2vw,17px)] font-black leading-snug text-[#14102a]"
+        className="absolute z-10 flex min-w-0 items-center justify-center px-2 text-center text-[clamp(12px,3.2vw,17px)] font-black leading-snug text-[#14102a] sm:px-4"
         style={getPositionStyle(bowlingEventOverlay.teamMembers)}
       >
-        <span className="line-clamp-3 break-keep">{teamMemberText}</span>
+        <span className="min-w-0 whitespace-normal break-words">{teamMemberText}</span>
       </div>
 
       <button
@@ -1394,10 +1407,10 @@ const BowlingEventBoardPage = ({
                     <span className="block truncate">{ranking.team.name || "-"}</span>
                   </td>
                   <td className="border-r border-gray-300 px-1 py-1 align-middle font-black">
-                    {ranking.totalScore > 0 ? `${ranking.totalScore}점` : "-"}
+                    {ranking.submittedCount > 0 ? `${ranking.totalScore}점` : "-"}
                   </td>
                   <td className="px-1.5 py-1 text-left align-middle font-bold">
-                    <span className="block whitespace-normal break-keep leading-tight">
+                    <span className="block min-w-0 whitespace-normal break-words leading-tight">
                       {ranking.team.members.length > 0 ? ranking.team.members.join(", ") : "-"}
                     </span>
                   </td>
@@ -1430,7 +1443,7 @@ interface EventOnePageProps {
   responseByEventId: Map<string, EventSurveyResponse>;
   onBack: () => void;
   onOpenSurvey: () => void;
-  onSaveResponse: (response: EventSurveyResponse) => void;
+  onSaveResponse: (response: EventSurveyResponse) => Promise<EventSurveyResponse>;
 }
 
 const EventOnePage = ({
@@ -1532,32 +1545,22 @@ const EventOnePage = ({
       tone={shouldRenderBowlingBoard ? "bowling" : surveyKind === "activity" ? "activity" : "default"}
     >
       {shouldRenderBowlingBoard ? (
-        <>
-          <BowlingEventBoardPage
-            assignedTeam={assignedTeam}
-            canEditScores={canEditScores}
-            canOpenLevelTest={canOpenLevelTest}
-            event={event}
-            game1Score={game1Score}
-            game2Score={game2Score}
-            hasAnyScore={hasAnyScore}
-            hasSubmittedPreSurvey={hasSubmittedPreSurvey}
-            myTeamRank={myTeamRank}
-            onLevelTestOpen={() => setIsLevelTestModalOpen(true)}
-            onScoreInputOpen={() => setIsScoreModalOpen(true)}
-            phase={phase}
-            rankings={rankings}
-            targetScore={targetScore}
-          />
-          <div className="bg-gray-50 px-3 pb-6 pt-3">
-            <TeamAssignmentPanel
-              assignedTeam={assignedTeam}
-              event={bowlingTeamSourceEvent}
-              isAllTeamsOpen={isAllTeamsOpen}
-              onToggleAllTeams={() => setIsAllTeamsOpen((isOpen) => !isOpen)}
-            />
-          </div>
-        </>
+        <BowlingEventBoardPage
+          assignedTeam={assignedTeam}
+          canEditScores={canEditScores}
+          canOpenLevelTest={canOpenLevelTest}
+          event={event}
+          game1Score={game1Score}
+          game2Score={game2Score}
+          hasAnyScore={hasAnyScore}
+          hasSubmittedPreSurvey={hasSubmittedPreSurvey}
+          myTeamRank={myTeamRank}
+          onLevelTestOpen={() => setIsLevelTestModalOpen(true)}
+          onScoreInputOpen={() => setIsScoreModalOpen(true)}
+          phase={phase}
+          rankings={rankings}
+          targetScore={targetScore}
+        />
       ) : null}
 
       {isWaitingSurvey ? (

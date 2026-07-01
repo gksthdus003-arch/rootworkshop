@@ -3765,12 +3765,12 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                       </span>
                                     </div>
                                     <div className="mt-2 grid gap-1 text-xs leading-5 text-gray-600 sm:grid-cols-2">
-                                      <span>1R 점수: {game1Score ?? "-"}</span>
-                                      <span>2R 점수: {game2Score ?? "-"}</span>
-                                      <span>개인 총점: {totalScore}점</span>
-                                      <span>목표점수: {targetScore ?? "-"}</span>
-                                      <span>1R 차이: {formatTargetDiff(game1Score, targetScore)}</span>
-                                      <span>2R 차이: {formatTargetDiff(game2Score, targetScore)}</span>
+                                      <span>소속 조: {assignedTeam?.name ?? "미배정"}</span>
+                                      <span>목표 점수: {targetScore ?? "-"}</span>
+                                      <span>1라운드 점수: {game1Score ?? "-"}</span>
+                                      <span>2라운드 점수: {game2Score ?? "-"}</span>
+                                      <span>총점: {totalScore}점</span>
+                                      <span>목표 대비 차이: {formatTargetDiff(totalScore, targetScore)}</span>
                                     </div>
                                   </div>
                                 );
@@ -3985,7 +3985,35 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                   <div className="mt-3 grid gap-3 lg:grid-cols-2">
                     {responseManageEventResponses.length > 0 ? (
                       responseManageEventResponses.map((response) => {
-                        const assignedTeam = getEventResponseTeam(responseManageEvent, response);
+                        const levelResponse =
+                          isBowlingCompetitionManage && linkedBowlingSurveyEvent
+                            ? findParticipantResponse(linkedBowlingSurveyResponses, response)
+                            : undefined;
+                        const assignedTeam = isBowlingCompetitionManage
+                          ? levelResponse
+                            ? getEventResponseTeam(bowlingTeamSourceEvent, levelResponse)
+                            : getEventResponseTeam(bowlingTeamSourceEvent, response)
+                          : getEventResponseTeam(responseManageEvent, response);
+                        const game1Score = getNumericResponseAnswer(response, "game1Score");
+                        const game2Score = getNumericResponseAnswer(response, "game2Score");
+                        const totalScore = getParticipantScoreTotal(response);
+                        const targetScoreValue =
+                          isBowlingCompetitionManage && levelResponse
+                            ? getResponseAnswerByKeyOrLabel(
+                                linkedBowlingSurveyEvent,
+                                levelResponse,
+                                "targetScore",
+                                ["목표"],
+                              )
+                            : undefined;
+                        const targetScoreText = Array.isArray(targetScoreValue)
+                          ? targetScoreValue[0]
+                          : targetScoreValue;
+                        const targetScoreNumber = Number(targetScoreText);
+                        const targetScore =
+                          Number.isFinite(targetScoreNumber) && targetScoreText !== ""
+                            ? targetScoreNumber
+                            : undefined;
 
                         return (
                           <section
@@ -4011,12 +4039,26 @@ export const AdminPage = ({ onBack }: AdminPageProps) => {
                                     : "bg-gray-100 text-gray-600",
                                 )}
                               >
-                                {getTeamAssignmentLabel(responseManageEvent, response)}
+                                {isBowlingCompetitionManage
+                                  ? assignedTeam?.name ?? "미배정"
+                                  : getTeamAssignmentLabel(responseManageEvent, response)}
                               </span>
                             </div>
 
                             <div className="mt-3 space-y-2 text-sm leading-5 text-gray-600">
-                              {Object.entries(response.answers).length > 0 ? (
+                              {isBowlingCompetitionManage ? (
+                                <div className="grid gap-1 text-xs leading-5 text-gray-600 sm:grid-cols-2">
+                                  <span>참가자명: {response.participantName}</span>
+                                  <span>소속 조: {assignedTeam?.name ?? "미배정"}</span>
+                                  <span>목표 점수: {targetScore ?? "-"}</span>
+                                  <span>1라운드 점수: {game1Score ?? "-"}</span>
+                                  <span>2라운드 점수: {game2Score ?? "-"}</span>
+                                  <span>총점: {totalScore}점</span>
+                                  <span className="sm:col-span-2">
+                                    목표 대비 차이: {formatTargetDiff(totalScore, targetScore)}
+                                  </span>
+                                </div>
+                              ) : Object.entries(response.answers).length > 0 ? (
                                 Object.entries(response.answers).map(([questionId, answer]) => {
                                   const question = responseManageEvent.survey.find(
                                     (item) => item.id === questionId,

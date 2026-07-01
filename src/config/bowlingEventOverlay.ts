@@ -42,14 +42,14 @@ export const bowlingEventOverlay = {
     top: "51%",
     width: "27%",
     height: "2.1%",
-    fontSize: "clamp(25px, 2.9vw, 16px)",
+    fontSize: "clamp(12px, 2.9vw, 16px)",
   },
   game2Diff: {
     left: "61.5%",
     top: "51%",
     width: "27%",
     height: "2.1%",
-    fontSize: "clamp(25px, 2.9vw, 16px)",
+    fontSize: "clamp(12px, 2.9vw, 16px)",
   },
   teamRankMessage: {
     left: "14.2%",
